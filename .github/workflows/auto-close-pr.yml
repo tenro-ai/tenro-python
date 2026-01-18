@@ -1,0 +1,66 @@
+name: Auto-close PRs
+
+on:
+  pull_request_target:
+    types: [opened]
+
+jobs:
+  close-external-pr:
+    # Close PRs from external contributors (not Dependabot)
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Close PR with explanation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" -R "${{ github.repository }}" --body "
+          Hey, thanks for taking the time to submit this! It's really appreciated 🙏
+
+          Pull requests are not being accepted right now, but your input is still welcome! Here's how you can help:
+
+          - ⭐ **Star the repo** to help others discover Tenro
+          - 🐛 **Found a bug?** [Open an issue](https://github.com/${{ github.repository }}/issues/new?template=bug_report.md)
+          - 💡 **Have an idea?** [Request a feature](https://github.com/${{ github.repository }}/issues/new?template=feature_request.md)
+          - 💬 **Questions?** Start a Discussion
+
+          All feedback is read and directly shapes what gets built. See [CONTRIBUTING.md](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md) for more details.
+
+          Thanks again! 💙
+          "
+
+          gh pr close "$PR_NUMBER" -R "${{ github.repository }}"
+
+  convert-dependabot-to-issue:
+    # Convert Dependabot PRs to Issues for tracking
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Convert PR to Issue and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Create issue from Dependabot PR
+          ISSUE_URL=$(gh issue create \
+            -R "${{ github.repository }}" \
+            --title "deps: $PR_TITLE" \
+            --label "dependencies" \
+            --body "Dependency update from Dependabot (PR #${PR_NUMBER}).")
+
+          # Comment on PR with link to issue
+          gh pr comment "$PR_NUMBER" -R "${{ github.repository }}" --body "
+          Thanks Dependabot! 🤖
+
+          Created ${ISSUE_URL} to track this update.
+          "
+
+          # Close the PR
+          gh pr close "$PR_NUMBER" -R "${{ github.repository }}"
