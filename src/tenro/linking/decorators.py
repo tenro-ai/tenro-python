@@ -131,7 +131,7 @@ def _resolve_entry_points(
     """Resolve and validate entry_points for class/object decoration.
 
     Args:
-        explicit_entry_points: User-provided entry_points (str, list, or None).
+        explicit_entry_points: Provided entry_points (str, list, or None).
         target: The class or object being decorated.
         decorator_type: "agent" or "tool" (for error messages).
         display_name: The display name for error messages.
@@ -435,6 +435,21 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
 
     target_path = f"{func.__module__}.{func.__qualname__}"
 
+    # Detect if decorating a method by checking if first param is self/cls
+    # This correctly handles: methods (self), classmethods (cls), functions (no self)
+    try:
+        sig = inspect.signature(func)
+        params = list(sig.parameters.keys())
+        is_method = bool(params) and params[0] in ("self", "cls")
+    except (ValueError, TypeError):
+        is_method = False
+
+    def _strip_self_if_method(args: tuple[Any, ...]) -> tuple[Any, ...]:
+        """Strip self from args if this is a method wrapper."""
+        if is_method and args:
+            return args[1:]
+        return args
+
     if inspect.isasyncgenfunction(func):
 
         @wraps(func)
@@ -461,7 +476,7 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
                 start_time=time.time(),
                 target_path=target_path,
                 display_name=agent_name,
-                input_data=args,
+                input_data=_strip_self_if_method(args),
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -515,7 +530,7 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
                 start_time=time.time(),
                 target_path=target_path,
                 display_name=agent_name,
-                input_data=args,
+                input_data=_strip_self_if_method(args),
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -569,7 +584,7 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
                 start_time=time.time(),
                 target_path=target_path,
                 display_name=agent_name,
-                input_data=args,
+                input_data=_strip_self_if_method(args),
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -613,7 +628,7 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
             start_time=time.time(),
             target_path=target_path,
             display_name=agent_name,
-            input_data=args,
+            input_data=_strip_self_if_method(args),
         )
         lifecycle = construct._lifecycle
         parent_span_id = lifecycle.start_span_manual(span)

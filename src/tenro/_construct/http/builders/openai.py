@@ -164,3 +164,39 @@ class OpenAISchema:
         )
 
         return ProviderResponse(response_dict)
+
+    @staticmethod
+    def create_response_from_blocks(blocks: list[Any], **kwargs: Any) -> ProviderResponse:
+        """Create OpenAI response from blocks (flattening - no interleaving).
+
+        OpenAI Chat API does not support interleaving. Text blocks are concatenated,
+        tool calls are extracted to separate tool_calls array.
+
+        Args:
+            blocks: List of str (text) or ToolCall objects.
+            **kwargs: Optional response metadata (model, token_usage, finish_reason).
+
+        Returns:
+            OpenAI-compatible response with flattened content + tool_calls.
+        """
+        from tenro._construct.http.builders.base import iterate_blocks
+
+        text_parts, tc_objects = iterate_blocks(blocks)
+        content = "".join(text_parts)
+
+        tool_calls = [
+            {
+                "id": tc.call_id,
+                "type": "function",
+                "function": {
+                    "name": tc.name,
+                    "arguments": serialize_arguments_to_json(tc.arguments),
+                },
+            }
+            for tc in tc_objects
+        ]
+
+        if tool_calls:
+            return OpenAISchema.create_response(content, tool_calls=tool_calls, **kwargs)
+        else:
+            return OpenAISchema.create_response(content, **kwargs)

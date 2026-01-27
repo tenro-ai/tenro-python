@@ -38,16 +38,18 @@ class AssistantAgent:
 
 ```python
 # tests/test_agent.py
-from tenro import Provider
-from tenro.simulate import llm, tool, tc
+from tenro import Provider, ToolCall
+from tenro.simulate import llm, tool
 from myapp.agent import search, AssistantAgent
+from tenro.testing import tenro
 
-def test_agent(construct):
+@tenro
+def test_agent():
     tool.simulate(search, result=["Simulated Doc"])
     llm.simulate(
         Provider.ANTHROPIC,
         responses=[
-            {"tool_calls": [tc(search, query="Find docs")]},
+            ToolCall(search, query="Find docs"),
             "Summary of docs.",
         ],
     )
@@ -100,16 +102,18 @@ def test_agent(mock_llm, mock_weather):
 **With Tenro:**
 
 ```python
-from tenro import Provider
-from tenro.simulate import llm, tool, tc
+from tenro import Provider, ToolCall
+from tenro.simulate import llm, tool
 from myapp.agent import get_weather, WeatherAgent
+from tenro.testing import tenro
 
-def test_agent(construct):
+@tenro
+def test_agent():
     tool.simulate(get_weather, result={"temp": 72, "condition": "sunny"})
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"tool_calls": [tc(get_weather, city="Paris")]},
+            ToolCall(get_weather, city="Paris"),
             "It's 72°F and sunny in Paris.",
         ],
     )
@@ -146,16 +150,19 @@ During tests, `Construct` intercepts linked LLM and tool calls and returns your 
 
 ```python
 from tenro import Provider
-from tenro.simulate import llm, tool, tc
+from tenro.simulate import llm, tool
+from tenro import ToolCall
 from myapp.agent import search, MyAgent
+from tenro.testing import tenro
 
-def test_verification(construct):
+@tenro
+def test_verification():
     # Setup
     tool.simulate(search, result=["doc1", "doc2"])
     llm.simulate(
         Provider.ANTHROPIC,
         responses=[
-            {"tool_calls": [tc(search, query="docs")]},
+            ToolCall(search, query="docs"),
             "Summary",
         ],
     )

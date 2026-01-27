@@ -6,6 +6,8 @@
 Shows how to control what your tools and LLMs return during tests.
 """
 
+from __future__ import annotations
+
 from examples.myapp import (
     SearchAgent,
     TopicConversationAgent,
@@ -13,11 +15,13 @@ from examples.myapp import (
     search_documents,
 )
 
-from tenro import Construct, Provider
+from tenro import Provider
 from tenro.simulate import llm, tool
+from tenro.testing import tenro
 
 
-def test_single_tool_result(construct: Construct) -> None:
+@tenro
+def test_single_tool_result() -> None:
     """Return the same value every time the tool is called."""
     # Control tool output - same result on every call
     tool.simulate(search_documents, result=["doc1", "doc2", "doc3"])
@@ -28,7 +32,8 @@ def test_single_tool_result(construct: Construct) -> None:
     tool.verify_many(search_documents, count=1)
 
 
-def test_sequential_tool_results(construct: Construct) -> None:
+@tenro
+def test_sequential_tool_results() -> None:
     """Return different values on each successive call."""
     # First call returns empty, second returns results (simulate retry logic)
     tool.simulate(
@@ -44,7 +49,8 @@ def test_sequential_tool_results(construct: Construct) -> None:
     tool.verify_many(search_documents, count=2)
 
 
-def test_single_llm_response(construct: Construct) -> None:
+@tenro
+def test_single_llm_response() -> None:
     """Control what the LLM returns."""
     # Every OpenAI call returns this response
     llm.simulate(Provider.OPENAI, response="The document discusses...")
@@ -55,7 +61,8 @@ def test_single_llm_response(construct: Construct) -> None:
     llm.verify(Provider.OPENAI, output_contains="discusses")
 
 
-def test_sequential_llm_responses(construct: Construct) -> None:
+@tenro
+def test_sequential_llm_responses() -> None:
     """Different responses for multi-turn conversations."""
     # Simulate a back-and-forth conversation
     llm.simulate(

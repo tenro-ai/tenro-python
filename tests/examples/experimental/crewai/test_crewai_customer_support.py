@@ -8,12 +8,15 @@ Unlike LangChain/OpenAI SDK, CrewAI expects "Action:" and "Action Input:" in the
 LLM's text output. Simulated responses must match this format.
 """
 
+from __future__ import annotations
+
 import json
 
 from examples.experimental.crewai.myapp.agents import CustomerSupportAgent, search_kb
 
 from tenro import Provider
 from tenro.simulate import agent, llm, tool
+from tenro.testing import tenro
 
 
 def react_action(tool_name: str, tool_input: dict) -> str:
@@ -30,7 +33,8 @@ def react_final(answer: str) -> str:
     return f"Thought: I now know the final answer.\nFinal Answer: {answer}\n"
 
 
-def test_customer_support_answers_question(construct) -> None:
+@tenro
+def test_customer_support_answers_question() -> None:
     """Test customer support agent uses knowledge base and LLM."""
     tool.simulate(search_kb.func, result="Full refunds within 30 days.")
 

@@ -3,15 +3,18 @@
 
 """Customer Support: Testing knowledge base retrieval with Pydantic AI."""
 
+from __future__ import annotations
+
 from examples.experimental.pydantic_ai.myapp.agents import CustomerSupportAgent
 from examples.myapp import search_knowledge_base
 
-from tenro import Provider
+from tenro import Provider, ToolCall
 from tenro.simulate import agent, llm, tool
-from tenro.tool_calls import tc
+from tenro.testing import tenro
 
 
-def test_customer_support_answers_question(construct) -> None:
+@tenro
+def test_customer_support_answers_question() -> None:
     """Test customer support agent uses knowledge base and LLM."""
     tool.simulate(
         search_knowledge_base,
@@ -21,8 +24,8 @@ def test_customer_support_answers_question(construct) -> None:
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("search_kb")]},
-            {"text": "You can get a full refund within 30 days of purchase."},
+            [ToolCall("search_kb")],
+            "You can get a full refund within 30 days of purchase.",
         ],
     )
 

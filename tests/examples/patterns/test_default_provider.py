@@ -10,11 +10,14 @@ on every simulate/verify call. Two approaches are shown:
 2. Per-test: Call construct.set_default_provider() in each test
 """
 
+from __future__ import annotations
+
 import pytest
 from examples.myapp import call_llm, multi_step_workflow
 
 from tenro import Construct, Provider
 from tenro.simulate import llm
+from tenro.testing import tenro
 
 # =============================================================================
 # APPROACH 1: Fixture-based default provider
@@ -79,7 +82,8 @@ def test_fixture_with_override(tenro_construct: Construct) -> None:
 # =============================================================================
 
 
-def test_without_default_provider(construct: Construct) -> None:
+@tenro
+def test_without_default_provider() -> None:
     """Without default provider, you must specify provider on every call."""
     # Must specify provider on simulate call
     llm.simulate(

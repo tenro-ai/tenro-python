@@ -6,6 +6,8 @@
 Shows how to ensure dangerous or expensive operations didn't happen.
 """
 
+from __future__ import annotations
+
 from examples.myapp import (
     SafeCleanupAgent,
     SmartCacheAgent,
@@ -14,11 +16,13 @@ from examples.myapp import (
     get_cached_data,
 )
 
-from tenro import Construct, Provider
+from tenro import Provider
 from tenro.simulate import llm, tool
+from tenro.testing import tenro
 
 
-def test_cache_hit_skips_api(construct: Construct) -> None:
+@tenro
+def test_cache_hit_skips_api() -> None:
     """When cache hits, expensive API should never be called."""
     # Cache returns data
     tool.simulate(get_cached_data, result={"data": "cached"})
@@ -32,7 +36,8 @@ def test_cache_hit_skips_api(construct: Construct) -> None:
     tool.verify_never(fetch_from_api)
 
 
-def test_dangerous_operation_not_triggered(construct: Construct) -> None:
+@tenro
+def test_dangerous_operation_not_triggered() -> None:
     """Verify dangerous operations don't happen accidentally."""
     # Note: Don't simulate delete_all_records since unconfirmed mode won't call it
 
@@ -42,7 +47,8 @@ def test_dangerous_operation_not_triggered(construct: Construct) -> None:
     tool.verify_never(delete_all_records)
 
 
-def test_llm_not_called_for_cached_response(construct: Construct) -> None:
+@tenro
+def test_llm_not_called_for_cached_response() -> None:
     """Verify LLM isn't called when response is cached."""
     # This test demonstrates verify_llm_never - no simulation needed
     # when validating that something WASN'T called

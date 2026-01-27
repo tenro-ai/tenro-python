@@ -3,15 +3,19 @@
 
 """Multi-Turn Conversation: Testing sequential LLM calls with custom OpenAI agents."""
 
+from __future__ import annotations
+
 from examples.myapp import ConversationAgent
 
-from tenro import Construct, Provider
+from tenro import Provider
 from tenro.simulate import llm
+from tenro.testing import tenro
 
 
-def test_multi_turn_conversation(construct: Construct) -> None:
+@tenro
+def test_multi_turn_conversation() -> None:
     """Test agent handles multi-turn conversation with context."""
-    construct.simulate_llm(
+    llm.simulate(
         Provider.OPENAI,
         responses=[
             "A list in Python is created with square brackets: my_list = [1, 2, 3]",

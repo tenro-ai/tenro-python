@@ -1,6 +1,6 @@
 [project]
 name = "tenro"
-version = "0.2.0"
+version = "0.2.1"
 description = "A modern multi-agent AI testing framework"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -109,3 +109,69 @@ examples = [
     "ddgs>=9.10.0,<10.0.0",
     "wikipedia>=1.4.0,<2.0.0",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "W",   # pycodestyle warnings
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "D",   # pydocstyle
+    "FIX", # flake8-fixme (TODO/FIXME comments)
+    "RUF", # Ruff-specific rules
+]
+ignore = [
+    "D100", # Missing docstring in public module
+    "D104", # Missing docstring in public package
+    "D105", # Missing docstring in magic method
+    "D107", # Missing docstring in __init__
+    "D417", # Missing argument descriptions in docstring
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+"examples/**" = ["D"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tenro"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+exclude = "^(tests|examples)/"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "examples"]
+pythonpath = [".", "src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+source = ["tenro"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@overload",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]
+show_missing = true

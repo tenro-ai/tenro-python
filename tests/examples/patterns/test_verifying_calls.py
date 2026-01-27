@@ -7,6 +7,8 @@ Shows how to verify your tools and LLMs were called the expected number of times
 Uses realistic LLM-driven agent patterns.
 """
 
+from __future__ import annotations
+
 from examples.myapp import (
     DataAgent,
     WeatherAgent,
@@ -14,19 +16,20 @@ from examples.myapp import (
     search_database,
 )
 
-from tenro import Provider
+from tenro import Provider, ToolCall
 from tenro.simulate import llm, tool
-from tenro.tool_calls import tc
+from tenro.testing import tenro
 
 
-def test_exact_call_count(construct) -> None:
+@tenro
+def test_exact_call_count() -> None:
     """Verify a tool was called exactly N times."""
     tool.simulate(get_weather, result={"temp": 72, "condition": "sunny"})
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("get_weather", city="NYC")]},
-            {"text": "NYC is 72°F and sunny."},
+            [ToolCall("get_weather", city="NYC")],
+            "NYC is 72°F and sunny.",
         ],
     )
 
@@ -36,14 +39,15 @@ def test_exact_call_count(construct) -> None:
     llm.verify_many(Provider.OPENAI, count=2)
 
 
-def test_minimum_calls(construct) -> None:
+@tenro
+def test_minimum_calls() -> None:
     """Verify at least N calls were made."""
     tool.simulate(get_weather, result={"temp": 70, "condition": "clear"})
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("get_weather", city="A")]},
-            {"text": "Weather checked."},
+            [ToolCall("get_weather", city="A")],
+            "Weather checked.",
         ],
     )
 
@@ -53,14 +57,15 @@ def test_minimum_calls(construct) -> None:
     llm.verify_many(Provider.OPENAI, at_least=1)
 
 
-def test_maximum_calls(construct) -> None:
+@tenro
+def test_maximum_calls() -> None:
     """Verify no more than N calls were made."""
     tool.simulate(search_database, result=[{"id": 1}])
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("search_database", query="test")]},
-            {"text": "Found 1 result."},
+            [ToolCall("search_database", query="test")],
+            "Found 1 result.",
         ],
     )
 
@@ -70,14 +75,15 @@ def test_maximum_calls(construct) -> None:
     llm.verify_many(Provider.OPENAI, at_most=5)
 
 
-def test_call_count_range(construct) -> None:
+@tenro
+def test_call_count_range() -> None:
     """Verify calls fall within a range."""
     tool.simulate(get_weather, result={"temp": 75})
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("get_weather", city="LA")]},
-            {"text": "LA is 75°F."},
+            [ToolCall("get_weather", city="LA")],
+            "LA is 75°F.",
         ],
     )
 
@@ -87,7 +93,8 @@ def test_call_count_range(construct) -> None:
     llm.verify_many(Provider.OPENAI, at_least=1, at_most=5)
 
 
-def test_verify_at_least_once(construct) -> None:
+@tenro
+def test_verify_at_least_once() -> None:
     """Verify a tool was called at least once (1 or more).
 
     Use verify() when you only care that something was called,
@@ -97,8 +104,8 @@ def test_verify_at_least_once(construct) -> None:
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("get_weather", city="NYC")]},
-            {"text": "It's 72°F."},
+            [ToolCall("get_weather", city="NYC")],
+            "It's 72°F.",
         ],
     )
 
@@ -109,7 +116,8 @@ def test_verify_at_least_once(construct) -> None:
     llm.verify(Provider.OPENAI)
 
 
-def test_verify_exactly_once(construct) -> None:
+@tenro
+def test_verify_exactly_once() -> None:
     """Verify a tool was called exactly once (not 0, not 2+).
 
     Use verify_many(count=1) when you need to assert the precise count.
@@ -118,8 +126,8 @@ def test_verify_exactly_once(construct) -> None:
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("get_weather", city="NYC")]},
-            {"text": "It's 72°F."},
+            [ToolCall("get_weather", city="NYC")],
+            "It's 72°F.",
         ],
     )
 
@@ -130,7 +138,8 @@ def test_verify_exactly_once(construct) -> None:
     llm.verify_many(Provider.OPENAI, count=2)
 
 
-def test_verify_never_called(construct) -> None:
+@tenro
+def test_verify_never_called() -> None:
     """Verify a tool was never called."""
     # LLM answers directly without using tools
     llm.simulate(Provider.OPENAI, response="I don't need to check the weather.")

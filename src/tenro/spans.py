@@ -9,15 +9,12 @@ Spans track operation lifecycle during test execution, starting in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
 from tenro._core.model_base import BaseModel
 from tenro._core.payloads import ToolRequest
-
-if TYPE_CHECKING:
-    pass
 
 
 class BaseSpan(BaseModel):

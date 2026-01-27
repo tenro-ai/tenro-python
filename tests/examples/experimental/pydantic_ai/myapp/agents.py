@@ -99,7 +99,7 @@ class RAGPipeline:
         Uses @agent.tool pattern for document fetching.
 
         Args:
-            question: User's question.
+            question: The question to answer.
             topic: Topic to retrieve documents for.
 
         Returns:

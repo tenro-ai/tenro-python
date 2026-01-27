@@ -6,8 +6,11 @@
 Tests an agent that searches the web and summarizes findings.
 """
 
-from tenro import Construct, Provider, link_agent, link_llm, link_tool
+from __future__ import annotations
+
+from tenro import Provider, link_agent, link_llm, link_tool
 from tenro.simulate import llm, tool
+from tenro.testing import tenro
 
 # APPLICATION CODE
 
@@ -52,10 +55,11 @@ class ResearchAssistantAgent:
 # TESTS
 
 
-def test_research_agent_finds_and_summarizes(construct: Construct):
+@tenro
+def test_research_agent_finds_and_summarizes():
     """Test that agent searches and synthesizes results."""
     # Control what tools and LLMs return
-    construct.simulate_tool(
+    tool.simulate(
         web_search,
         result=[
             {
@@ -66,7 +70,7 @@ def test_research_agent_finds_and_summarizes(construct: Construct):
             {"title": "Future of AI", "snippet": "Agentic AI...", "url": "https://example.com/2"},
         ],
     )
-    construct.simulate_llm(
+    llm.simulate(
         Provider.OPENAI,
         response="AI agents are becoming the dominant paradigm in 2025.",
     )
@@ -79,11 +83,12 @@ def test_research_agent_finds_and_summarizes(construct: Construct):
     llm.verify_many(Provider.OPENAI, at_least=1)
 
 
-def test_research_agent_handles_no_results(construct: Construct):
+@tenro
+def test_research_agent_handles_no_results():
     """Test agent behavior when search returns nothing."""
     # Simulate empty search results
-    construct.simulate_tool(web_search, result=[])
-    construct.simulate_llm(
+    tool.simulate(web_search, result=[])
+    llm.simulate(
         Provider.OPENAI,
         response="I couldn't find relevant information on this topic.",
     )

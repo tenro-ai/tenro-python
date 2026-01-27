@@ -48,7 +48,7 @@ def _validate_parsed_tool_call(name: Any, arguments: Any) -> tuple[str, dict[str
     if not isinstance(name, str):
         raise TypeError(
             f"Dict tool call 'name' must be str, got {type(name).__name__}. "
-            f"For callables, use tc(callable, ...)."
+            f"For callables, use ToolCall(callable, ...)."
         )
 
     if not isinstance(arguments, dict):
@@ -59,7 +59,7 @@ def _validate_parsed_tool_call(name: Any, arguments: Any) -> tuple[str, dict[str
     except (TypeError, ValueError) as e:
         raise TypeError(
             f"Tool call arguments are not JSON-serializable: {e}. "
-            f"Dict inputs must be JSON-safe; use tc() for automatic coercions."
+            f"Dict inputs must be JSON-safe; use ToolCall() for automatic coercions."
         ) from e
 
     return name, arguments

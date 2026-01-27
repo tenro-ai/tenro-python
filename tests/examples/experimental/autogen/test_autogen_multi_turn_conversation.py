@@ -3,13 +3,17 @@
 
 """Multi-Turn Conversation: Testing sequential LLM calls with AutoGen."""
 
+from __future__ import annotations
+
 from examples.experimental.autogen.myapp.agents import ConversationAgent
 
 from tenro import Provider
 from tenro.simulate import agent, llm
+from tenro.testing import tenro
 
 
-def test_multi_turn_conversation(construct) -> None:
+@tenro
+def test_multi_turn_conversation() -> None:
     """Test agent handles multi-turn conversation with context."""
     llm.simulate(
         Provider.OPENAI,

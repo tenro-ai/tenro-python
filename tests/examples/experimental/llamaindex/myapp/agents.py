@@ -62,7 +62,7 @@ class RAGPipeline:
         Uses VectorStoreIndex with MockEmbedding for retrieval.
 
         Args:
-            question: User's question.
+            question: The question to answer.
             topic: Topic to retrieve documents for.
 
         Returns:

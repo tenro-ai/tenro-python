@@ -10,8 +10,11 @@ coordinate in a fixed sequence. This is different from LLM-driven tool
 calling - it tests that pipeline stages execute in order.
 """
 
+from __future__ import annotations
+
 from tenro import link_agent, link_tool
 from tenro.simulate import agent, tool
+from tenro.testing import tenro
 
 
 # Tools for the pipeline
@@ -68,7 +71,8 @@ class PipelineAgent:
         return PersistenceAgent().run(result)
 
 
-def test_pipeline_tools_execute_in_order(construct) -> None:
+@tenro
+def test_pipeline_tools_execute_in_order() -> None:
     """Verify pipeline tools are called in sequence."""
     tool.simulate(validate_input, result=True)
     tool.simulate(process_data, result={"processed": True})
@@ -82,7 +86,8 @@ def test_pipeline_tools_execute_in_order(construct) -> None:
     tool.verify_many(save_result, count=1)
 
 
-def test_pipeline_agents_called(construct) -> None:
+@tenro
+def test_pipeline_agents_called() -> None:
     """Verify orchestrator delegates to sub-agents."""
     tool.simulate(validate_input, result=True)
     tool.simulate(process_data, result={"processed": True})

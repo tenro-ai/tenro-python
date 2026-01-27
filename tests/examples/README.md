@@ -75,7 +75,7 @@ API feature demonstrations - learn what Tenro can do.
 
 - **test_simulating_responses.py** — Control tool/LLM returns with `result=`, `results=[]`, `responses=[]`
 - **test_simulating_errors.py** — Test error handling with exceptions in results
-- **test_simulating_tool_calls.py** — Simulate LLM tool calls with `tc()` helper and `tool_calls=`
+- **test_simulating_tool_calls.py** — Simulate LLM tool calls with `ToolCall` in `responses=`
 - **test_verifying_calls.py** — Assert call counts with `verify_many(count=, at_least=, at_most=)`
 - **test_verifying_content.py** — Check LLM responses with `output_contains=`, `call_index=`
 - **test_verifying_never_called.py** — Ensure operations didn't happen with `verify_never()`

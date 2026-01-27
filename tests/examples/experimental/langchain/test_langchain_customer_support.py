@@ -3,14 +3,18 @@
 
 """Customer Support: Testing knowledge base retrieval with LangChain."""
 
+from __future__ import annotations
+
 from examples.experimental.langchain.myapp.agents import CustomerSupportAgent
 from examples.myapp import search_knowledge_base
 
 from tenro import Provider
 from tenro.simulate import agent, llm, tool
+from tenro.testing import tenro
 
 
-def test_customer_support_answers_question(construct) -> None:
+@tenro
+def test_customer_support_answers_question() -> None:
     """Test customer support agent uses knowledge base and LLM."""
     tool.simulate(
         search_knowledge_base,

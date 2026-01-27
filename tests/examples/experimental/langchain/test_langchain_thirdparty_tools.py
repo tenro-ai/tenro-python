@@ -11,6 +11,8 @@ like DuckDuckGoSearchRun and WikipediaQueryRun without wrapping them
 in your source code.
 """
 
+from __future__ import annotations
+
 from examples.experimental.langchain.myapp.research_agent_anthropic import (
     WebResearchAgentAnthropic,
 )
@@ -24,9 +26,11 @@ from langchain_community import tools as lc_tools
 
 from tenro import Provider
 from tenro.simulate import agent, llm, register, tool
+from tenro.testing import tenro
 
 
-def test_research_agent_with_openai(construct) -> None:
+@tenro
+def test_research_agent_with_openai() -> None:
     """Test agent using DuckDuckGo and Wikipedia tools with OpenAI."""
     register(lc_tools.DuckDuckGoSearchRun.invoke)
     register(lc_tools.WikipediaQueryRun.invoke)
@@ -51,7 +55,8 @@ def test_research_agent_with_openai(construct) -> None:
     llm.verify(Provider.OPENAI)
 
 
-def test_research_agent_with_anthropic(construct) -> None:
+@tenro
+def test_research_agent_with_anthropic() -> None:
     """Test agent using DuckDuckGo and Wikipedia tools with Anthropic."""
     register(lc_tools.DuckDuckGoSearchRun.invoke)
     register(lc_tools.WikipediaQueryRun.invoke)
@@ -76,7 +81,8 @@ def test_research_agent_with_anthropic(construct) -> None:
     llm.verify(Provider.ANTHROPIC)
 
 
-def test_research_agent_with_gemini(construct) -> None:
+@tenro
+def test_research_agent_with_gemini() -> None:
     """Test agent using DuckDuckGo and Wikipedia tools with Gemini."""
     register(lc_tools.DuckDuckGoSearchRun.invoke)
     register(lc_tools.WikipediaQueryRun.invoke)

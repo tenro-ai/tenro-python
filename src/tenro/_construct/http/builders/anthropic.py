@@ -168,3 +168,65 @@ class AnthropicSchema:
         )
 
         return ProviderResponse(response_dict)
+
+    @staticmethod
+    def create_response_from_blocks(blocks: list[Any], **kwargs: Any) -> ProviderResponse:
+        """Create Anthropic response from ordered blocks (interleaving support).
+
+        Anthropic supports interleaved content blocks, so block order is preserved.
+
+        Args:
+            blocks: List of str (text) or ToolCall objects in order.
+            **kwargs: Optional response metadata (model, token_usage, stop_reason).
+
+        Returns:
+            Anthropic-compatible response with interleaved content array.
+        """
+        from tenro._construct.http.test_vectors.loader import ReplaceList, TemplateLoader
+        from tenro.tool_calls import ToolCall
+
+        content_array: list[dict[str, Any]] = []
+        has_tool_use = False
+
+        for block in blocks:
+            if isinstance(block, str):
+                content_array.append({"type": "text", "text": block})
+            elif isinstance(block, ToolCall):
+                has_tool_use = True
+                content_array.append(
+                    {
+                        "type": "tool_use",
+                        "id": block.call_id,
+                        "name": block.name,
+                        "input": block.arguments,
+                    }
+                )
+            else:
+                from tenro._construct.http.builders.base import validate_block
+
+                validate_block(block)  # Raises TenroValidationError
+
+        feature = "tool_use" if has_tool_use else "text"
+
+        if has_tool_use and "stop_reason" not in kwargs:
+            kwargs["stop_reason"] = "tool_use"
+
+        overrides: dict[str, Any] = {"content": ReplaceList(content_array)}
+
+        if "stop_reason" in kwargs:
+            overrides["stop_reason"] = kwargs["stop_reason"]
+        if "model" in kwargs:
+            overrides["model"] = kwargs["model"]
+        if "token_usage" in kwargs:
+            overrides["usage"] = kwargs["token_usage"]
+
+        overrides["id"] = f"msg_{int(time.time())}"
+
+        response_dict = TemplateLoader.load(
+            provider="anthropic",
+            route="messages",
+            feature=feature,
+            **overrides,
+        )
+
+        return ProviderResponse(response_dict)

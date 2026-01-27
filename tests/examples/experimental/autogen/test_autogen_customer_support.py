@@ -3,14 +3,17 @@
 
 """Customer Support: Testing knowledge base retrieval with AutoGen."""
 
+from __future__ import annotations
+
 from examples.experimental.autogen.myapp.agents import CustomerSupportAgent, search_kb
 
-from tenro import Provider
+from tenro import Provider, ToolCall
 from tenro.simulate import agent, llm, tool
-from tenro.tool_calls import tc
+from tenro.testing import tenro
 
 
-def test_customer_support_answers_question(construct) -> None:
+@tenro
+def test_customer_support_answers_question() -> None:
     """Test customer support agent uses knowledge base and LLM.
 
     Flow: LLM decides to call search_kb → tool returns result → LLM answers.
@@ -22,8 +25,8 @@ def test_customer_support_answers_question(construct) -> None:
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("search_kb", query="refund")]},
-            {"text": "You can get a full refund within 30 days of purchase. TERMINATE"},
+            [ToolCall("search_kb", query="refund")],
+            "You can get a full refund within 30 days of purchase. TERMINATE",
         ],
     )
 

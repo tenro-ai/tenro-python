@@ -13,6 +13,7 @@ import asyncio
 import functools
 import inspect
 import time
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,7 @@ from tenro._construct.simulate.llm import (
     validate_llm_simulation_params,
 )
 from tenro._construct.simulate.llm.tool_call import normalize_tool_calls
+from tenro._construct.simulate.response_parser import contributes_tool_calls, parse_response_item
 from tenro._construct.simulate.rule import SimulationRule
 from tenro._construct.simulate.target_resolution import (
     parse_dotted_path,
@@ -42,11 +44,13 @@ from tenro._construct.simulate.target_resolution import (
     validate_target_is_patchable,
 )
 from tenro._construct.simulate.tracker import SimulationTracker, ToolAgentTracker
-from tenro._construct.simulate.types import SimulationType
+from tenro._construct.simulate.types import ResponsesInput, SimulationType
 from tenro._core import context
 from tenro._core.response_types import ProviderResponse
 from tenro._core.spans import LLMCall
 from tenro.linking.metadata import get_display_name
+from tenro.llm_response import LLMResponse, RawLLMResponse
+from tenro.tool_calls import ToolCall
 
 if TYPE_CHECKING:
     from tenro._construct.http import HttpInterceptor
@@ -440,27 +444,31 @@ def _resolve_display_name(target: Any, fallback_path: str) -> str | None:
 class SimulatedResponse:
     """Single response item for LLM simulation.
 
-    Encapsulates response content with optional tool calls. Passes simulation
+    Encapsulates response content as ordered blocks. Passes simulation
     data between orchestrator and HTTP interceptor layers.
 
     Args:
-        content: Response text or exception to raise.
-        tool_calls: Optional tool calls for this response.
+        content: Exception to raise, or empty string for normal responses.
+        blocks: Ordered blocks (str and ToolCall objects). Always present
+            for normal responses; adapters use this for response building.
+        raw_payload: Raw provider JSON passthrough (for RawLLMResponse).
+            When set, adapters use this directly instead of building from blocks.
     """
 
     content: str | Exception
-    tool_calls: list[Any] | None = None
+    blocks: list[Any] | None = None
+    raw_payload: dict[str, Any] | None = None
 
 
 def _normalize_to_list(
     response: str | None,
-    responses: str | Exception | list[str | Exception | dict[str, Any]] | None,
-) -> list[str | Exception | dict[str, Any]]:
+    responses: ResponsesInput,
+) -> list[Any]:
     """Normalize all input forms to a single list.
 
     Args:
         response: Deprecated single response param.
-        responses: Single or list of responses (str, Exception, or dict).
+        responses: Single or list of responses.
 
     Returns:
         List of response items (copies list to avoid mutation).
@@ -469,7 +477,7 @@ def _normalize_to_list(
         return [response]
     if responses is None:
         return []
-    if isinstance(responses, (str, Exception)):
+    if isinstance(responses, (str, Exception, ToolCall, LLMResponse, RawLLMResponse, dict)):
         return [responses]
     return list(responses)
 
@@ -504,7 +512,7 @@ class SimulationOrchestrator:
         self._simulation_tracker = SimulationTracker()
         self._tool_tracker = ToolAgentTracker()
         self._agent_tracker = ToolAgentTracker()
-        # HTTP intercepts at adapter level, but user expects their provider_id in spans
+        # HTTP intercepts at adapter level; spans show provider_id, not adapter
         self._adapter_to_provider: dict[str, str] = {}
         # Functions with __code__ swapped for capture-safe simulation
         self._registered_trampolines: list[Callable[..., Any]] = []
@@ -865,7 +873,7 @@ class SimulationOrchestrator:
         adapter: str | None = None,
         *,
         response: str | None = None,
-        responses: str | list[str | Exception | dict[str, Any]] | None = None,
+        responses: ResponsesInput = None,
         model: str | None = None,
         tool_calls: list[SimToolCall | str | dict[str, Any]] | None = None,
         use_http: bool | None = None,
@@ -880,39 +888,48 @@ class SimulationOrchestrator:
             adapter: HTTP adapter name (openai, anthropic, gemini) for endpoint
                 selection. If None, defaults to provider value.
             response: Single string response.
-            responses: List of responses for sequential calls. Each response can be:
+            responses: Response(s) for sequential calls. Each item can be:
                 - str: Plain text response
                 - Exception: Raise on that call
-                - dict: Response with optional per-response tool_calls
+                - ToolCall: Single tool call (shorthand)
+                - list[ToolCall]: Multiple tool calls per turn
+                - list[str | ToolCall]: Ordered blocks with interleaved text
+                - LLMResponse: Explicit block structure
+                - dict: Legacy format {"text": ..., "tool_calls": [...]} (deprecated)
             model: Model identifier override.
-            tool_calls: Tool calls the LLM should emit. Accepts ToolCall objects,
-                dicts, or strings (tool name only).
+            tool_calls: DEPRECATED. Tool calls to attach to first response.
+                Use ToolCall in responses instead: responses=[ToolCall(...)]
             use_http: Force HTTP interception or dispatch mode.
             optional: If True, won't raise if unused.
             **response_kwargs: Provider-specific options.
 
         Raises:
-            ValueError: If response parameters are invalid.
+            TenroValidationError: If response parameters are invalid or conflicting.
 
         Examples:
             Simulate a simple text response::
 
                 construct.simulate_llm(Provider.OPENAI, response="Hello!")
 
-            Simulate tool calls with the tc() helper::
+            Simulate tool calls with shorthand (preferred)::
 
                 construct.simulate_llm(
                     Provider.OPENAI,
-                    response="Searching...",
-                    tool_calls=[tc(search, query="AI")],
+                    responses=[ToolCall(search, query="AI"), "Found results!"],
                 )
 
-            Test handling of hallucinated tools (LLM requests non-existent tool)::
+            Multiple tool calls per turn::
 
                 construct.simulate_llm(
                     Provider.OPENAI,
-                    response="Using magic",
-                    tool_calls=[ToolCall(name="nonexistent_tool", arguments={"x": 1})],
+                    responses=[[ToolCall(search, q="A"), ToolCall(fetch, id=1)]],
+                )
+
+            Interleaved text and tool calls::
+
+                construct.simulate_llm(
+                    Provider.OPENAI,
+                    responses=[["Let me search", ToolCall(search, q="AI"), "Done!"]],
                 )
         """
         from tenro._construct.http.interceptor import (
@@ -920,24 +937,71 @@ class SimulationOrchestrator:
             get_supported_providers,
         )
 
-        if tool_calls is not None and responses is not None:
-            for resp in responses if isinstance(responses, list) else []:
-                if isinstance(resp, dict) and "tool_calls" in resp:
-                    raise ValueError(
-                        "Cannot use top-level tool_calls= when responses contains a dict "
-                        'with "tool_calls". Put tool_calls inside the response dict(s): '
-                        "responses=[{'tool_calls': [...]}, ...]"
+        if tool_calls is not None:
+            warnings.warn(
+                "The 'tool_calls=' parameter is deprecated. "
+                "Use ToolCall objects directly in responses=: "
+                "responses=[ToolCall('search', query='AI')]",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+
+        if responses is not None and isinstance(responses, list):
+            for resp in responses:
+                if isinstance(resp, dict):
+                    warnings.warn(
+                        "Dict format in responses is deprecated. "
+                        "Use LLMResponse or ToolCall: "
+                        "responses=[LLMResponse(blocks=['text', ToolCall(...)])]",
+                        DeprecationWarning,
+                        stacklevel=3,
+                    )
+                    break
+
+        # Validate tool_calls= conflicts with embedded tool calls
+        if tool_calls is not None:
+            # Consider both deprecated response= and responses= parameters
+            raw_items_for_check: list[Any] = []
+            if response is not None:
+                raw_items_for_check = [response]
+            elif responses is not None:
+                raw_items_for_check = (
+                    list(responses) if isinstance(responses, list) else [responses]
+                )
+
+            # Empty responses with tool_calls= is invalid
+            if not raw_items_for_check:
+                from tenro.errors import TenroValidationError
+
+                raise TenroValidationError(
+                    "The 'tool_calls=' parameter requires at least one response to apply to. "
+                    "Provide responses=['text'] or use responses=[ToolCall(...)] directly."
+                )
+
+            # Check each response item for conflicts
+            for item in raw_items_for_check:
+                # RawLLMResponse can't have tool calls injected
+                if isinstance(item, RawLLMResponse):
+                    from tenro.errors import TenroValidationError
+
+                    raise TenroValidationError(
+                        "Cannot use 'tool_calls=' with RawLLMResponse in responses. "
+                        "RawLLMResponse is a passthrough format that cannot be modified. "
+                        "Use responses=[ToolCall(...)] or LLMResponse(blocks=[...]) instead."
                     )
 
-        simple_responses: str | Exception | list[str | Exception] | None = None
-        if responses is not None:
-            if isinstance(responses, (str, Exception)):
-                simple_responses = responses
-            elif isinstance(responses, list):
-                simple_responses = [
-                    r.get("text", "") if isinstance(r, dict) else r for r in responses
-                ]
-        validate_llm_simulation_params(response, simple_responses)
+                # Check if item contributes tool_calls (conflict)
+                if contributes_tool_calls(item):
+                    from tenro.errors import TenroValidationError
+
+                    raise TenroValidationError(
+                        "Cannot use 'tool_calls=' when responses contains ToolCall items. "
+                        "Use the shorthand directly: responses=[ToolCall('search', query='AI')] "
+                        "or responses=[LLMResponse(blocks=['text', ToolCall(...)])]"
+                    )
+
+        # Validate mutual exclusivity (only checks if both provided)
+        validate_llm_simulation_params(response, "present" if responses is not None else None)
 
         raw_items = _normalize_to_list(response, responses)
         normalized_tool_calls = normalize_tool_calls(tool_calls)
@@ -946,25 +1010,30 @@ class SimulationOrchestrator:
         has_embedded_tool_calls = False
 
         for item in raw_items:
-            if isinstance(item, dict):
-                content: str | Exception = item.get("text", "")
-                tc = normalize_tool_calls(item.get("tool_calls")) if "tool_calls" in item else None
-                if tc:
-                    has_embedded_tool_calls = True
-            else:
-                content = item
-                tc = None
-            simulated_responses.append(SimulatedResponse(content=content, tool_calls=tc))
+            if contributes_tool_calls(item):
+                has_embedded_tool_calls = True
+
+            parsed = parse_response_item(item)
+            if isinstance(parsed, Exception):
+                simulated_responses.append(SimulatedResponse(content=parsed))
+            elif isinstance(parsed, RawLLMResponse):
+                simulated_responses.append(
+                    SimulatedResponse(content="", raw_payload=parsed.payload)
+                )
+            elif isinstance(parsed, LLMResponse):
+                # Always use blocks - parser normalizes all inputs to LLMResponse(blocks=[...])
+                simulated_responses.append(SimulatedResponse(content="", blocks=parsed.blocks))
 
         if normalized_tool_calls and simulated_responses:
             first_is_exception = isinstance(simulated_responses[0].content, Exception)
             if first_is_exception:
                 pass
-            elif not has_embedded_tool_calls or simulated_responses[0].tool_calls is None:
-                simulated_responses[0] = SimulatedResponse(
-                    content=simulated_responses[0].content,
-                    tool_calls=normalized_tool_calls,
+            elif not has_embedded_tool_calls:
+                # Merge tool_calls into first response's blocks
+                merged_blocks = list(simulated_responses[0].blocks or []) + list(
+                    normalized_tool_calls
                 )
+                simulated_responses[0] = SimulatedResponse(content="", blocks=merged_blocks)
 
         # Fail-fast for non-simulatable callable targets when use_http=False.
         # This must happen BEFORE provider detection which may fail on plain functions.
@@ -1113,11 +1182,11 @@ class SimulationOrchestrator:
             response_kwargs["model"] = model
 
         for i, resp in enumerate(simulated_responses):
-            if isinstance(resp.content, Exception) and resp.tool_calls:
+            if isinstance(resp.content, Exception) and resp.blocks:
                 raise ValueError(
                     f"Response at index {i} is an Exception, "
-                    "but tool_calls were specified. "
-                    "Exceptions cannot have associated tool_calls."
+                    "but blocks were specified. "
+                    "Exceptions cannot have associated blocks."
                 )
 
         self._http_simulation_enabled = True
@@ -1248,12 +1317,15 @@ class SimulationOrchestrator:
                 )
 
             sim_resp = simulated_responses[idx]
-            response_content = sim_resp.content
 
-            if isinstance(response_content, Exception):
-                raise response_content
+            # Handle exceptions stored in content
+            if isinstance(sim_resp.content, Exception):
+                raise sim_resp.content
 
-            return response_content
+            # Extract text from blocks for dispatch mode return value
+            blocks = sim_resp.blocks or []
+            text_parts = [b for b in blocks if isinstance(b, str)]
+            return "".join(text_parts)
 
         # Only linked/registered targets supported (via dispatch, not setattr)
         # Use resolved_target from earlier (handles string paths)
@@ -1305,8 +1377,15 @@ class SimulationOrchestrator:
 
         if is_generator:
             # For generators, use generator_items to yield all responses
-            # Cast to list[object] to satisfy SimulationRule typing
-            generator_items: list[object] = [resp.content for resp in simulated_responses]
+            # Extract text from blocks (same as _dispatch_side_effect)
+            generator_items: list[object] = []
+            for resp in simulated_responses:
+                if isinstance(resp.content, Exception):
+                    generator_items.append(resp.content)
+                else:
+                    blocks = resp.blocks or []
+                    text_parts = [b for b in blocks if isinstance(b, str)]
+                    generator_items.append("".join(text_parts))
             dispatch_rule = SimulationRule(
                 side_effect=_dispatch_side_effect,
                 generator_items=generator_items,

@@ -156,3 +156,48 @@ def extract_tool_name_and_args(
         arguments = {}
 
     return name, arguments
+
+
+def validate_block(block: Any) -> None:
+    """Validate a single block is str or ToolCall.
+
+    Args:
+        block: Block to validate.
+
+    Raises:
+        TenroValidationError: If block is not str or ToolCall.
+    """
+    from tenro.errors import TenroValidationError
+    from tenro.tool_calls import ToolCall
+
+    if not isinstance(block, (str, ToolCall)):
+        raise TenroValidationError(f"Block must be str or ToolCall, got {type(block).__name__}")
+
+
+def iterate_blocks(blocks: list[Any]) -> tuple[list[str], list[Any]]:
+    """Extract text and tool call blocks from mixed list.
+
+    Args:
+        blocks: List of str and ToolCall objects.
+
+    Returns:
+        Tuple of (text_parts, tool_calls) where text_parts is list[str]
+        and tool_calls is list[ToolCall].
+
+    Raises:
+        TenroValidationError: If any block is not str or ToolCall.
+    """
+    from tenro.tool_calls import ToolCall
+
+    text_parts: list[str] = []
+    tool_calls: list[Any] = []
+
+    for block in blocks:
+        if isinstance(block, str):
+            text_parts.append(block)
+        elif isinstance(block, ToolCall):
+            tool_calls.append(block)
+        else:
+            validate_block(block)  # Raises TenroValidationError
+
+    return text_parts, tool_calls

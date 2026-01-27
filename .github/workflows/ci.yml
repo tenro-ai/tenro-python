@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: |
+          uv python install 3.12
+          uv venv --python 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Check linting
+        run: uv run ruff check . --output-format=github
+
+      - name: Type check
+        run: uv run mypy src/
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: |
+          uv python install ${{ matrix.python-version }}
+          uv venv --python ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --group dev --group examples
+
+      - name: Run tests
+        env:
+          OPENAI_API_KEY: sk-fake-key-for-testing
+          ANTHROPIC_API_KEY: sk-ant-fake-key-for-testing
+          GOOGLE_API_KEY: fake-gemini-key-for-testing
+        run: uv run pytest tests/ -v
+
+  clean-room:
+    name: Clean Room Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: |
+          uv python install 3.12
+          uv venv --python 3.12
+
+      - name: Build wheel
+        run: uv build
+
+      - name: Clean-room install and test
+        run: |
+          set -euo pipefail
+
+          CLEAN_ROOM=$(mktemp -d)
+          trap 'rm -rf "$CLEAN_ROOM"' EXIT
+          echo "Clean room: $CLEAN_ROOM"
+
+          cp -R tests "$CLEAN_ROOM/tests"
+          WHEEL="$(ls -1 dist/*.whl | sort | tail -1)"
+          echo "Installing wheel: $WHEEL"
+
+          uv venv --python 3.12 "$CLEAN_ROOM/.venv"
+          VIRTUAL_ENV="$CLEAN_ROOM/.venv" uv pip install "$WHEEL"
+          VIRTUAL_ENV="$CLEAN_ROOM/.venv" uv pip install pytest pytest-asyncio respx
+
+          "$CLEAN_ROOM/.venv/bin/python" -c "import tenro; print(f'tenro {tenro.__version__}')"
+
+          cd "$CLEAN_ROOM"
+          # Run core tests only (not examples, not openai_integration marked tests)
+          PYTHONPATH=tests "$CLEAN_ROOM/.venv/bin/pytest" \
+            tests/test_tool_simulation.py \
+            tests/test_agent_simulation.py \
+            tests/test_pytest_plugin.py \
+            tests/test_llm_simulation.py \
+            -v -m "not openai_integration"

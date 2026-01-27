@@ -3,22 +3,26 @@
 
 """RAG Pipeline: Testing document retrieval with custom OpenAI agents."""
 
+from __future__ import annotations
+
 from examples.myapp import RAGPipeline, fetch_documents, generate_response
 
-from tenro import Construct, Provider
+from tenro import Provider
 from tenro.simulate import llm, tool
+from tenro.testing import tenro
 
 
-def test_rag_pipeline_synthesizes_answer(construct: Construct) -> None:
+@tenro
+def test_rag_pipeline_synthesizes_answer() -> None:
     """Test RAG pipeline fetches documents and generates answer."""
-    construct.simulate_tool(
+    tool.simulate(
         fetch_documents,
         result=[
             {"id": "doc1", "text": "Machine learning uses algorithms to learn."},
             {"id": "doc2", "text": "Deep learning is a subset of ML."},
         ],
     )
-    construct.simulate_llm(
+    llm.simulate(
         Provider.OPENAI,
         target=generate_response,
         response="Machine learning is a field where algorithms learn patterns from data.",

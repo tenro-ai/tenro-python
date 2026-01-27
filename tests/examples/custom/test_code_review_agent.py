@@ -6,8 +6,11 @@
 Tests an agent that reviews pull requests and suggests improvements.
 """
 
-from tenro import Construct, Provider, link_agent, link_llm, link_tool
+from __future__ import annotations
+
+from tenro import Provider, link_agent, link_llm, link_tool
 from tenro.simulate import llm, tool
+from tenro.testing import tenro
 
 # APPLICATION CODE
 
@@ -51,16 +54,17 @@ class CodeReviewAgent:
 # TESTS
 
 
-def test_code_review_agent_finds_security_issue(construct: Construct):
+@tenro
+def test_code_review_agent_finds_security_issue():
     """Test that agent identifies code issues."""
     # Control what tools and LLMs return
-    construct.simulate_tool(
+    tool.simulate(
         fetch_pr_diff,
         result="+ def process(data):\n+     eval(data)  # dangerous!",
     )
-    construct.simulate_tool(post_review_comment, result=True)
+    tool.simulate(post_review_comment, result=True)
     # Simulate at HTTP level - response becomes the message content
-    construct.simulate_llm(
+    llm.simulate(
         Provider.OPENAI,
         response="Security issue: Using eval() is dangerous. Use ast.literal_eval().",
     )
@@ -74,15 +78,16 @@ def test_code_review_agent_finds_security_issue(construct: Construct):
     llm.verify(output_contains="Security issue")
 
 
-def test_code_review_agent_approves_clean_code(construct: Construct):
+@tenro
+def test_code_review_agent_approves_clean_code():
     """Test agent with well-formatted code."""
     # Simulate well-formatted PR
-    construct.simulate_tool(
+    tool.simulate(
         fetch_pr_diff,
         result="+ def add(a: int, b: int) -> int:\n+     return a + b",
     )
-    construct.simulate_tool(post_review_comment, result=True)
-    construct.simulate_llm(
+    tool.simulate(post_review_comment, result=True)
+    llm.simulate(
         Provider.OPENAI,
         response="LGTM! Good implementation with type hints.",
     )

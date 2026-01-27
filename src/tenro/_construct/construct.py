@@ -17,6 +17,7 @@ from tenro._construct.http import HttpInterceptor
 from tenro._construct.in_memory_store import EventStore
 from tenro._construct.lifecycle import SpanAccessor, SpanLinker
 from tenro._construct.simulate.orchestrator import SimulationOrchestrator
+from tenro._construct.simulate.types import ResponsesInput
 from tenro._construct.verify import ConstructVerifications
 from tenro._core.lifecycle_manager import LifecycleManager
 from tenro._core.spans import AgentRun, LLMCall, ToolCall
@@ -1042,7 +1043,7 @@ class Construct:
         *,
         target: str | Callable[..., Any] | None = None,
         response: str | None = None,
-        responses: str | list[str | Exception | dict[str, Any]] | None = None,
+        responses: ResponsesInput = None,
         model: str | None = None,
         tool_calls: list[Any] | None = None,
         use_http: bool | None = None,
@@ -1078,17 +1079,23 @@ class Construct:
             target: Optional dotted-path string to a function/method (e.g.,
                 "openai.chat.completions.create"). If not provided, uses the
                 default target for the specified provider.
-            response: Single string response (most common case).
-            responses: List of responses for sequential calls. Can include
-                Exception objects which will be raised when reached. Can also
-                include dicts with per-response tool_calls.
+            response: Single string response (most common case). Deprecated;
+                prefer responses= for all new code.
+            responses: Responses for sequential calls. Accepts:
+                - str: Simple text response
+                - ToolCall: Single tool call (e.g., ToolCall(search, q="AI"))
+                - list[ToolCall]: Multiple tool calls in one turn
+                - list[str | ToolCall]: Interleaved text and tool calls
+                - LLMResponse: Explicit block structure for complex responses
+                - Exception: Will be raised when this turn is reached
+                - dict: Legacy {text?, tool_calls?} format (deprecated)
             model: Model identifier (e.g., "gpt-4", "claude-3-opus").
                 Overrides provider default model name.
             tool_calls: Tool calls the LLM should emit. Accepts:
-                - ToolCall objects: tc("get_weather", city="Paris")
+                - ToolCall objects: ToolCall("get_weather", city="Paris")
                 - Dicts: {"name": "tool", "arguments": {...}}
                 - Strings (name only): "get_weather"
-                Use tc() helper for type-safe callable references.
+                Use ToolCall(my_func, **kwargs) to reference tools by function.
             use_http: Force HTTP interception (True) or dispatch mode (False).
                 Defaults to True for known providers. When False, target must
                 be decorated with @link_llm or registered via tenro.simulate.register().
@@ -1107,8 +1114,26 @@ class Construct:
             ValueError: If provider string is not registered or uses built-in name.
 
         Examples:
-            >>> # Single response (most common, uses HTTP interception)
-            >>> construct.simulate_llm(Provider.ANTHROPIC, response="Hello!")
+            >>> # Simple text response
+            >>> construct.simulate_llm(Provider.ANTHROPIC, responses="Hello!")
+            >>>
+            >>> # Single tool call (shorthand)
+            >>> construct.simulate_llm(
+            ...     Provider.OPENAI,
+            ...     responses=ToolCall(search, query="AI"),
+            ... )
+            >>>
+            >>> # Multiple tool calls in one turn
+            >>> construct.simulate_llm(
+            ...     Provider.OPENAI,
+            ...     responses=[[ToolCall(search, q="A"), ToolCall(fetch, id=1)]],
+            ... )
+            >>>
+            >>> # Interleaved text and tool calls
+            >>> construct.simulate_llm(
+            ...     Provider.ANTHROPIC,
+            ...     responses=[["Let me search", ToolCall(search, q="AI"), "Done!"]],
+            ... )
             >>>
             >>> # Multi-turn conversation
             >>> construct.simulate_llm(
@@ -1118,21 +1143,12 @@ class Construct:
             >>>
             >>> # Custom provider (register first)
             >>> construct.register_provider("mistral", adapter=Provider.OPENAI)
-            >>> construct.simulate_llm("mistral", response="Hello!")
-            >>>
-            >>> # Custom target with @link_llm decorator
-            >>> @link_llm
-            ... def my_llm_wrapper(prompt: str) -> str: ...
-            >>> construct.simulate_llm(
-            ...     Provider.ANTHROPIC,
-            ...     target=my_llm_wrapper,
-            ...     response="Hello!",
-            ... )
+            >>> construct.simulate_llm("mistral", responses="Hello!")
             >>>
             >>> # Optional simulation for branch coverage
             >>> construct.simulate_llm(
             ...     Provider.OPENAI,
-            ...     response="Fallback response",
+            ...     responses="Fallback response",
             ...     optional=True,
             ... )
         """

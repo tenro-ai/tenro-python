@@ -72,7 +72,7 @@ class RAGPipeline:
         Uses InMemoryVectorStore with retriever for semantic search.
 
         Args:
-            question: User's question.
+            question: The question to answer.
             topic: Topic to retrieve documents for.
 
         Returns:

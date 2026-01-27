@@ -43,7 +43,7 @@ def normalize_result_sequence(result: Any, results: list[Any] | None) -> list[An
     if result is not None:
         return [result]
     elif results is not None:
-        return results.copy()  # Copy to avoid mutating user's list
+        return results.copy()  # Copy to avoid mutating the original list
     else:
         return None
 

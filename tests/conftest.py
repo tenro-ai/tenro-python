@@ -22,12 +22,20 @@ if TYPE_CHECKING:
 sys.path.insert(0, str(Path(__file__).parent))
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers",
+        "openai_integration: tests requiring LLM client libraries (openai, anthropic)",
+    )
+
+
 @pytest.fixture
 def construct(request: pytest.FixtureRequest) -> Generator[Construct, None, None]:
     """Auto-activating construct fixture.
 
     The construct is automatically activated before the test and cleaned up after.
-    No 'with' block needed - just use the construct directly!
+    No 'with' block needed!
 
     Args:
         request: Pytest fixture request for accessing test item.
@@ -35,11 +43,18 @@ def construct(request: pytest.FixtureRequest) -> Generator[Construct, None, None
     Yields:
         Pre-activated Construct instance.
 
-    Example:
-        >>> def test_my_agent(construct: Construct):
-        ...     construct.simulate_llm(Provider.OPENAI, response="Hello")
-        ...     result = my_agent.run()  # No 'with' needed!
+    Example (recommended - use module-level API):
+        >>> @tenro
+        ... def test_my_agent():
+        ...     from tenro.simulate import llm
+        ...     llm.simulate(Provider.OPENAI, response="Hello")
+        ...     result = my_agent.run()
         ...     assert "Hello" in result
+
+    Example (direct access - when you need construct methods):
+        >>> def test_custom_provider(construct: Construct):
+        ...     construct.register_provider("mistral", adapter=Provider.OPENAI)
+        ...     llm.simulate("mistral", response="Hello")
     """
     from tenro.construct import Construct
 

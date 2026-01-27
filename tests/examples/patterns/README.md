@@ -24,7 +24,7 @@ uv run pytest examples/patterns/ -v
 |------|-------------|
 | `test_simulating_responses.py` | Control LLM/tool returns with `result=`, `results=[]` |
 | `test_simulating_errors.py` | Test error handling with exceptions |
-| `test_simulating_tool_calls.py` | Simulate LLM tool calls with `tc()` helper |
+| `test_simulating_tool_calls.py` | Simulate LLM tool calls with `ToolCall` |
 | `test_verifying_calls.py` | Assert call counts with `verify_many(count=, at_least=, at_most=)` |
 | `test_verifying_content.py` | Check responses with `output_contains=` |
 | `test_verifying_never_called.py` | Ensure operations didn't happen |

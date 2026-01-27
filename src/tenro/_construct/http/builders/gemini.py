@@ -149,3 +149,58 @@ class GeminiSchema:
         )
 
         return ProviderResponse(response_dict)
+
+    @staticmethod
+    def create_response_from_blocks(blocks: list[Any], **kwargs: Any) -> ProviderResponse:
+        """Create Gemini response from ordered blocks (interleaving support).
+
+        Gemini supports interleaved parts, so block order is preserved.
+
+        Args:
+            blocks: List of str (text) or ToolCall objects in order.
+            **kwargs: Optional response metadata (finish_reason, safety_ratings).
+
+        Returns:
+            Gemini-compatible response with interleaved parts array.
+        """
+        from tenro._construct.http.test_vectors.loader import ReplaceList, TemplateLoader
+        from tenro.tool_calls import ToolCall
+
+        parts: list[dict[str, Any]] = []
+        has_function_call = False
+
+        for block in blocks:
+            if isinstance(block, str):
+                parts.append({"text": block})
+            elif isinstance(block, ToolCall):
+                has_function_call = True
+                parts.append(
+                    {
+                        "functionCall": {
+                            "name": block.name,
+                            "args": block.arguments,
+                        }
+                    }
+                )
+            else:
+                from tenro._construct.http.builders.base import validate_block
+
+                validate_block(block)  # Raises TenroValidationError
+
+        feature = "function_call" if has_function_call else "text"
+
+        overrides: dict[str, Any] = {"candidates": [{"content": {"parts": ReplaceList(parts)}}]}
+
+        if "finish_reason" in kwargs:
+            overrides["candidates"][0]["finishReason"] = kwargs["finish_reason"]
+        if "safety_ratings" in kwargs:
+            overrides["candidates"][0]["safetyRatings"] = kwargs["safety_ratings"]
+
+        response_dict = TemplateLoader.load(
+            provider="gemini",
+            route="generate_content",
+            feature=feature,
+            **overrides,
+        )
+
+        return ProviderResponse(response_dict)

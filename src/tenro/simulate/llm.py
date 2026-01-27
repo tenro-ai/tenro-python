@@ -28,7 +28,9 @@ from tenro.simulate._helpers import get_construct_or_raise
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from tenro._construct.simulate.types import ResponsesInput
     from tenro.spans import LLMCallSpan
+    from tenro.tool_calls import ToolCall
 
 
 def simulate(
@@ -36,9 +38,9 @@ def simulate(
     *,
     target: str | Callable[..., Any] | None = None,
     response: str | None = None,
-    responses: str | list[str | Exception | dict[str, Any]] | None = None,
+    responses: ResponsesInput = None,
     model: str | None = None,
-    tool_calls: list[Any] | None = None,
+    tool_calls: list[ToolCall | str | dict[str, Any]] | None = None,
     use_http: bool | None = None,
     optional: bool = False,
     **response_kwargs: Any,

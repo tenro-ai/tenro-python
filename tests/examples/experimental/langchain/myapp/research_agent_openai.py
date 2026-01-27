@@ -19,7 +19,7 @@ class WebResearchAgentOpenAI:
         """Research a topic using web search and Wikipedia.
 
         Args:
-            question: User's research question.
+            question: The research question.
 
         Returns:
             Synthesized answer from research.

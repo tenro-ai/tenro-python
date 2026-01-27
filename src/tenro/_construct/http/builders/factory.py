@@ -42,7 +42,7 @@ class ProviderSchemaFactory:
 
     Attributes:
         _schemas: Built-in provider schema classes keyed by provider name.
-        _custom_schemas: Registry of user-provided schema builders.
+        _custom_schemas: Registry of custom schema builders.
         _detection_patterns: Substrings used for provider auto-detection.
         _default_targets: Default target paths for provider APIs.
         _code_examples: Provider-specific code snippets for error messages.
@@ -99,8 +99,8 @@ class ProviderSchemaFactory:
             "extract": "return response.content[0].text",
         },
         "gemini": {
-            "client": "client = genai.GenerativeModel('gemini-pro')",
-            "call": "response = client.generate_content(...)",
+            "client": "client = genai.Client(api_key='test')",
+            "call": "response = client.models.generate_content(...)",
             "extract": "return response.text",
         },
     }
@@ -204,6 +204,56 @@ class ProviderSchemaFactory:
         )
 
     @classmethod
+    def create_response_from_blocks(
+        cls,
+        provider: str,
+        blocks: list[Any],
+        **kwargs: Any,
+    ) -> ProviderResponse:
+        """Create provider response from ordered blocks.
+
+        Providers that support interleaving (Anthropic, Gemini) preserve block order.
+        Providers that don't (OpenAI Chat) flatten: concatenate text, extract tool_calls.
+
+        Args:
+            provider: Provider name ("openai", "anthropic", "gemini", or custom).
+            blocks: List of str (text) or ToolCall objects in desired order.
+            **kwargs: Provider-specific response options.
+
+        Returns:
+            Provider-compatible response object.
+
+        Raises:
+            ValueError: If provider is unknown.
+        """
+        if provider in cls._schemas:
+            schema_class = cls._schemas[provider]
+            return schema_class.create_response_from_blocks(blocks, **kwargs)
+
+        if provider in cls._custom_schemas:
+            # Custom providers: flatten to content + tool_calls (legacy behavior)
+            from tenro.tool_calls import ToolCall
+
+            text_parts = [b for b in blocks if isinstance(b, str)]
+            tool_calls = [b for b in blocks if isinstance(b, ToolCall)]
+            content = "".join(text_parts)
+
+            schema_builder = cls._custom_schemas[provider]
+            if tool_calls:
+                tc_dicts = cls.create_tool_calls(provider, tool_calls)
+                custom_dict = schema_builder(content, tool_calls=tc_dicts, **kwargs)
+            else:
+                custom_dict = schema_builder(content, **kwargs)
+            return ProviderResponse(custom_dict)
+
+        all_providers = sorted(list(cls._schemas.keys()) + list(cls._custom_schemas.keys()))
+        raise ValueError(
+            f"Unknown provider '{provider}'.\n"
+            f"Available: {', '.join(all_providers)}, custom\n"
+            f"Register custom provider: ProviderSchemaFactory.register(...)"
+        )
+
+    @classmethod
     def create_tool_calls(
         cls,
         provider: str,
@@ -226,20 +276,20 @@ class ProviderSchemaFactory:
             ValueError: If provider doesn't support tool calls.
 
         Examples:
-            >>> from tenro._construct.simulate.llm.tool_call import tc
-            >>> ProviderSchemaFactory.create_tool_calls("openai", [tc("get_weather")])
+            >>> from tenro import ToolCall
+            >>> ProviderSchemaFactory.create_tool_calls("openai", [ToolCall("get_weather")])
             [{'id': 'call_...', 'type': 'function', 'function': {...}}]
 
             >>> ProviderSchemaFactory.create_tool_calls(
             ...     "anthropic",
-            ...     [tc("search", query="AI")]
+            ...     [ToolCall("search", query="AI")]
             ... )
             [{'type': 'tool_use', 'id': 'toolu_...', 'name': 'search', 'input': {...}}]
 
             >>> # Custom provider with adapter
             >>> ProviderSchemaFactory.create_tool_calls(
             ...     "mistral",
-            ...     [tc("search", query="AI")],
+            ...     [ToolCall("search", query="AI")],
             ...     adapter="openai"
             ... )
             [{'id': 'call_...', 'type': 'function', 'function': {...}}]

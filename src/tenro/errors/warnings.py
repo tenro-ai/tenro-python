@@ -73,7 +73,7 @@ class TenroTracingWarning(TenroWarning):
 
 
 class TenroCoercionWarning(TenroWarning):
-    """Emitted when tc() automatically converts a value to JSON-serializable format.
+    """Emitted when ToolCall() automatically converts a value to JSON-serializable format.
 
     This helps catch unexpected coercions. If you expect the coercion, silence with:
         warnings.filterwarnings("ignore", category=TenroCoercionWarning)

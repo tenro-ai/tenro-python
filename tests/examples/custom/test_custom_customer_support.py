@@ -3,19 +3,23 @@
 
 """Customer Support: Testing knowledge base retrieval with custom OpenAI agents."""
 
+from __future__ import annotations
+
 from examples.myapp import CustomerSupportAgent, generate_response, search_knowledge_base
 
-from tenro import Construct, Provider
+from tenro import Provider
 from tenro.simulate import llm, tool
+from tenro.testing import tenro
 
 
-def test_customer_support_answers_question(construct: Construct) -> None:
+@tenro
+def test_customer_support_answers_question() -> None:
     """Test customer support agent uses knowledge base and LLM."""
-    construct.simulate_tool(
+    tool.simulate(
         search_knowledge_base,
         result=[{"title": "Refund Policy", "content": "Full refunds within 30 days."}],
     )
-    construct.simulate_llm(
+    llm.simulate(
         Provider.OPENAI,
         target=generate_response,
         response="You can get a full refund within 30 days of purchase.",

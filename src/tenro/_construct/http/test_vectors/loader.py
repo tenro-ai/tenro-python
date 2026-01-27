@@ -18,12 +18,25 @@ from tenro._construct.http.schemas.gemini.generate_content import GenerateConten
 from tenro._construct.http.schemas.openai.chat_completions import ChatCompletion
 
 
+class ReplaceList(list[Any]):
+    """List that replaces rather than merges during deep merge.
+
+    Standard lists are merged element-by-element with fixture data.
+    Use ReplaceList when the caller provides the complete list.
+
+    Examples:
+        >>> overrides = {"content": ReplaceList([{"type": "text", "text": "Hi"}])}
+    """
+
+    pass
+
+
 class TemplateLoader:
     """Loads fixtures and validates them with Pydantic templates.
 
     Flow:
     1. Load JSON fixture from fixtures/{provider}/{route}/{feature}_response.json
-    2. Deep merge with user overrides
+    2. Deep merge with overrides
     3. Validate with Pydantic template (`extra="allow"` for forward compatibility)
     4. Return dict for simulation
 
@@ -126,7 +139,7 @@ class TemplateLoader:
 
         Args:
             base: Base dict (from fixture).
-            overrides: Override dict (from user).
+            overrides: Override dict to merge.
 
         Returns:
             Merged dict (does not modify inputs).
@@ -140,7 +153,9 @@ class TemplateLoader:
         result = base.copy()
 
         for key, value in overrides.items():
-            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            if isinstance(value, ReplaceList):
+                result[key] = list(value)
+            elif key in result and isinstance(result[key], dict) and isinstance(value, dict):
                 # Recursively merge dicts
                 result[key] = cls._deep_merge(result[key], value)
             elif (
@@ -172,7 +187,7 @@ class TemplateLoader:
 
         Args:
             base: Base list (from fixture).
-            overrides: Override list (from user).
+            overrides: Override list to merge.
 
         Returns:
             Merged list.

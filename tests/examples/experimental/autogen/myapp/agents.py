@@ -96,7 +96,7 @@ class RAGPipeline:
         """Process a question with RAG.
 
         Args:
-            question: User's question.
+            question: The question to answer.
             topic: Topic to retrieve documents for (unused - LLM decides).
 
         Returns:

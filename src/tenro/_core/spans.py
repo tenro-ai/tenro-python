@@ -135,6 +135,9 @@ class ToolCall(BaseSpan):
         kwargs: Keyword arguments passed to the tool.
         result: Tool response data, if any.
         simulated: Whether this call was intercepted by simulation.
+        invoked_by_llm_call_id: ID of the LLMCall that requested this tool,
+            if the tool was invoked in response to an LLM's tool_calls output.
+            None for direct tool calls from application code.
     """
 
     target_path: str
@@ -143,6 +146,7 @@ class ToolCall(BaseSpan):
     kwargs: dict[str, Any] = Field(default_factory=dict)
     result: Any = None
     simulated: bool = False
+    invoked_by_llm_call_id: str | None = None
 
 
 class AgentRun(BaseSpan):

@@ -3,14 +3,18 @@
 
 """RAG Pipeline: Testing document retrieval with LangGraph."""
 
+from __future__ import annotations
+
 from examples.experimental.langgraph.myapp.agents import RAGPipeline
 from examples.myapp import fetch_documents
 
 from tenro import Provider
 from tenro.simulate import agent, llm, tool
+from tenro.testing import tenro
 
 
-def test_rag_pipeline_synthesizes_answer(construct) -> None:
+@tenro
+def test_rag_pipeline_synthesizes_answer() -> None:
     """Test RAG pipeline fetches documents and generates answer."""
     tool.simulate(
         fetch_documents,

@@ -6,13 +6,17 @@
 Shows how to check what the LLM responded in multi-turn conversations.
 """
 
+from __future__ import annotations
+
 from examples.myapp import TopicConversationAgent
 
-from tenro import Construct, Provider
+from tenro import Provider
 from tenro.simulate import llm
+from tenro.testing import tenro
 
 
-def test_check_first_response(construct: Construct) -> None:
+@tenro
+def test_check_first_response() -> None:
     """Verify content in the first LLM response (default)."""
     llm.simulate(
         Provider.OPENAI,
@@ -29,7 +33,8 @@ def test_check_first_response(construct: Construct) -> None:
     llm.verify(output_contains="Machine learning")
 
 
-def test_check_specific_response(construct: Construct) -> None:
+@tenro
+def test_check_specific_response() -> None:
     """Verify content in a specific response by index."""
     llm.simulate(
         Provider.OPENAI,
@@ -47,7 +52,8 @@ def test_check_specific_response(construct: Construct) -> None:
     llm.verify(output_contains="ERROR", call_index=None)
 
 
-def test_check_last_response(construct: Construct) -> None:
+@tenro
+def test_check_last_response() -> None:
     """Verify content in the last response using negative indexing."""
     llm.simulate(
         Provider.OPENAI,
@@ -64,7 +70,8 @@ def test_check_last_response(construct: Construct) -> None:
     llm.verify(output_contains="completed", call_index=-1)
 
 
-def test_check_any_response(construct: Construct) -> None:
+@tenro
+def test_check_any_response() -> None:
     """Verify content exists in any response (permissive mode)."""
     llm.simulate(
         Provider.OPENAI,

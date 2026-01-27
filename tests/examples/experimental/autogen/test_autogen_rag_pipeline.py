@@ -3,14 +3,17 @@
 
 """RAG Pipeline: Testing document retrieval with AutoGen."""
 
+from __future__ import annotations
+
 from examples.experimental.autogen.myapp.agents import RAGPipeline, fetch_docs
 
-from tenro import Provider
+from tenro import Provider, ToolCall
 from tenro.simulate import agent, llm, tool
-from tenro.tool_calls import tc
+from tenro.testing import tenro
 
 
-def test_rag_pipeline_synthesizes_answer(construct) -> None:
+@tenro
+def test_rag_pipeline_synthesizes_answer() -> None:
     """Test RAG pipeline fetches documents and generates answer.
 
     Flow: LLM decides to call fetch_docs → tool returns docs → LLM synthesizes.
@@ -25,8 +28,8 @@ def test_rag_pipeline_synthesizes_answer(construct) -> None:
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("fetch_docs", topic="AI")]},
-            {"text": "ML uses algorithms to learn from data. TERMINATE"},
+            [ToolCall("fetch_docs", topic="AI")],
+            "ML uses algorithms to learn from data. TERMINATE",
         ],
     )
 

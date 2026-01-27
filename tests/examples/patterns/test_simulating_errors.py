@@ -6,13 +6,17 @@
 Shows how to simulate failures and test your agent's error recovery.
 """
 
+from __future__ import annotations
+
 import pytest
 from examples.myapp import ResilientAgent, call_api
 
 from tenro.simulate import tool
+from tenro.testing import tenro
 
 
-def test_error_then_success(construct) -> None:
+@tenro
+def test_error_then_success() -> None:
     """First call fails, retry succeeds - test recovery logic."""
     tool.simulate(
         call_api,
@@ -28,7 +32,8 @@ def test_error_then_success(construct) -> None:
     tool.verify_many(call_api, count=2)  # Tried twice
 
 
-def test_all_retries_fail(construct) -> None:
+@tenro
+def test_all_retries_fail() -> None:
     """All retries fail - test error escalation."""
     tool.simulate(
         call_api,
@@ -45,7 +50,8 @@ def test_all_retries_fail(construct) -> None:
     tool.verify_many(call_api, count=3)  # All retries exhausted
 
 
-def test_specific_error_types(construct) -> None:
+@tenro
+def test_specific_error_types() -> None:
     """Different error types trigger different handling."""
     tool.simulate(
         call_api,

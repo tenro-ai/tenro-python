@@ -3,15 +3,18 @@
 
 """RAG Pipeline: Testing document retrieval with Pydantic AI."""
 
+from __future__ import annotations
+
 from examples.experimental.pydantic_ai.myapp.agents import RAGPipeline
 from examples.myapp import fetch_documents
 
-from tenro import Provider
+from tenro import Provider, ToolCall
 from tenro.simulate import agent, llm, tool
-from tenro.tool_calls import tc
+from tenro.testing import tenro
 
 
-def test_rag_pipeline_synthesizes_answer(construct) -> None:
+@tenro
+def test_rag_pipeline_synthesizes_answer() -> None:
     """Test RAG pipeline fetches documents and generates answer."""
     tool.simulate(
         fetch_documents,
@@ -24,8 +27,8 @@ def test_rag_pipeline_synthesizes_answer(construct) -> None:
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("fetch_docs")]},
-            {"text": "Machine learning is a field where algorithms learn patterns from data."},
+            [ToolCall("fetch_docs")],
+            "Machine learning is a field where algorithms learn patterns from data.",
         ],
     )
 

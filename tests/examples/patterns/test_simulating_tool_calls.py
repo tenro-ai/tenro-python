@@ -1,23 +1,33 @@
 # Copyright 2026 Tenro.ai
 # SPDX-License-Identifier: Apache-2.0
 
-"""Pattern: Simulating LLM tool calls with tc() helper.
+"""Pattern: Simulating LLM tool calls with ToolCall and LLMResponse.
 
 Shows how to simulate LLM responses that include tool calls using the type-safe
-tc() helper and ToolCall dataclass across different providers.
+ToolCall constructor across different providers.
 
 Key concepts:
-- tc(func, **args): Create tool call from callable (type-safe, IDE autocomplete)
-- ToolCall(name, arguments): Create tool call from string name (escape hatch)
-- tool_calls=[...]: Attach tool calls to LLM response
-- Per-response tool_calls in responses=[{...}] for multi-turn control
+- ToolCall(func, **args): Create tool call from callable (type-safe, IDE autocomplete)
+- ToolCall("name", **args): Create tool call from string name
+- responses=[ToolCall(...)]: Single tool call response
+- responses=[["text", ToolCall(...)]]: Text + tool call in one response (nested list)
+- responses=[LLMResponse([...])] : Explicit ordered blocks (interleaving)
 - Verification with llm.verify(), tool.verify(), llm.calls(), tool.calls()
+
+Interleaving note:
+  Text blocks in LLMResponse represent the model's reasoning BEFORE/WHILE making
+  tool call requests - NOT commentary on tool results. Tool results arrive in a
+  separate response after tools execute. Anthropic and Gemini preserve block order;
+  OpenAI Chat flattens to content + tool_calls (order lost but still works).
 """
+
+from __future__ import annotations
 
 import unittest
 
-from tenro import Construct, Provider, ToolCall, link_agent, link_llm, link_tool, tc
+from tenro import Construct, LLMResponse, Provider, ToolCall, link_agent, link_llm, link_tool
 from tenro.simulate import llm, tool
+from tenro.testing import tenro
 
 # ============================================================================
 # APPLICATION CODE - Tools
@@ -50,9 +60,9 @@ def send_email(to: str, subject: str, body: str) -> bool:
 @link_llm(Provider.OPENAI)
 def call_openai(prompt: str) -> str:
     """Call OpenAI API."""
-    import openai
+    from examples.myapp.clients import get_openai_client
 
-    client = openai.OpenAI(api_key="test-key")
+    client = get_openai_client()
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
@@ -63,23 +73,25 @@ def call_openai(prompt: str) -> str:
 @link_llm(Provider.ANTHROPIC)
 def call_anthropic(prompt: str) -> str:
     """Call Anthropic API."""
-    import anthropic
+    from anthropic.types import TextBlock
+    from examples.myapp.clients import get_anthropic_client
 
-    client = anthropic.Anthropic(api_key="test-key")
+    client = get_anthropic_client()
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text
+    text_blocks = [b for b in response.content if isinstance(b, TextBlock)]
+    return text_blocks[0].text if text_blocks else ""
 
 
 @link_llm(Provider.GEMINI)
 def call_gemini(prompt: str) -> str:
     """Call Gemini API."""
-    from google import genai
+    from examples.myapp.clients import get_gemini_client
 
-    client = genai.Client(api_key="test-key")
+    client = get_gemini_client()
     response = client.models.generate_content(
         model="gemini-2.0-flash",
         contents=prompt,
@@ -173,12 +185,12 @@ defensive_agent = DefensiveAgent()
 # ============================================================================
 
 
-def test_openai_single_tool_call(construct: Construct) -> None:
-    """OpenAI: Single tool call using tc() helper."""
+@tenro
+def test_openai_single_tool_call() -> None:
+    """OpenAI: Single tool call using ToolCall() helper."""
     llm.simulate(
         Provider.OPENAI,
-        response="Summary of results",
-        tool_calls=[tc(search, query="AI research")],
+        responses=[["Summary of results", ToolCall(search, query="AI research")]],
     )
     tool.simulate(search, result=["paper1", "paper2"])
 
@@ -192,14 +204,17 @@ def test_openai_single_tool_call(construct: Construct) -> None:
     assert tool.calls()[0].display_name == "search"
 
 
-def test_openai_multiple_tool_calls(construct: Construct) -> None:
+@tenro
+def test_openai_multiple_tool_calls() -> None:
     """OpenAI: Multiple tool calls in parallel."""
     llm.simulate(
         Provider.OPENAI,
-        response="Summary with weather",
-        tool_calls=[
-            tc(search, query="news"),
-            tc(get_weather, city="NYC"),
+        responses=[
+            [
+                "Summary with weather",
+                ToolCall(search, query="news"),
+                ToolCall(get_weather, city="NYC"),
+            ]
         ],
     )
     tool.simulate(search, result=["headline"])
@@ -212,13 +227,14 @@ def test_openai_multiple_tool_calls(construct: Construct) -> None:
     tool.verify_many(get_weather, count=1)
 
 
-def test_openai_multi_turn(construct: Construct) -> None:
-    """OpenAI: Multi-turn with per-response tool_calls."""
+@tenro
+def test_openai_multi_turn() -> None:
+    """OpenAI: Multi-turn with per-response tool calls."""
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "Starting search", "tool_calls": [tc(search, query="first")]},
-            {"text": "Final summary"},
+            ["Starting search", ToolCall(search, query="first")],
+            "Final summary",
         ],
     )
     tool.simulate(search, result=["r1"])
@@ -230,12 +246,12 @@ def test_openai_multi_turn(construct: Construct) -> None:
     assert len(llm.calls()) == 2
 
 
-def test_openai_with_dataclass(construct: Construct) -> None:
-    """OpenAI: ToolCall dataclass for string names."""
+@tenro
+def test_openai_with_string_name() -> None:
+    """OpenAI: ToolCall with string name."""
     llm.simulate(
         Provider.OPENAI,
-        response="Found results",
-        tool_calls=[ToolCall(name="search", arguments={"query": "AI"})],
+        responses=[["Found results", ToolCall(name="search", arguments={"query": "AI"})]],
     )
     tool.simulate(search, result=["result"])
 
@@ -250,12 +266,12 @@ def test_openai_with_dataclass(construct: Construct) -> None:
 # ============================================================================
 
 
-def test_anthropic_single_tool_call(construct: Construct) -> None:
-    """Anthropic: Single tool call using tc() helper."""
+@tenro
+def test_anthropic_single_tool_call() -> None:
+    """Anthropic: Single tool call using ToolCall() helper."""
     llm.simulate(
         Provider.ANTHROPIC,
-        response="Summary of results",
-        tool_calls=[tc(search, query="ML papers")],
+        responses=[["Summary of results", ToolCall(search, query="ML papers")]],
     )
     tool.simulate(search, result=["paper1", "paper2"])
 
@@ -268,14 +284,17 @@ def test_anthropic_single_tool_call(construct: Construct) -> None:
     assert llm.calls()[0].provider == "anthropic"
 
 
-def test_anthropic_multiple_tool_calls(construct: Construct) -> None:
+@tenro
+def test_anthropic_multiple_tool_calls() -> None:
     """Anthropic: Multiple tool calls in a single response."""
     llm.simulate(
         Provider.ANTHROPIC,
-        response="Results with weather",
-        tool_calls=[
-            tc(search, query="data"),
-            tc(get_weather, city="Paris"),
+        responses=[
+            [
+                "Results with weather",
+                ToolCall(search, query="data"),
+                ToolCall(get_weather, city="Paris"),
+            ]
         ],
     )
     tool.simulate(search, result=["doc1"])
@@ -287,12 +306,12 @@ def test_anthropic_multiple_tool_calls(construct: Construct) -> None:
     tool.verify_many(count=2)
 
 
-def test_anthropic_with_dataclass(construct: Construct) -> None:
-    """Anthropic: ToolCall dataclass for string names."""
+@tenro
+def test_anthropic_with_string_name() -> None:
+    """Anthropic: ToolCall with string name."""
     llm.simulate(
         Provider.ANTHROPIC,
-        response="Search complete",
-        tool_calls=[ToolCall(name="search", arguments={"query": "docs"})],
+        responses=[["Search complete", ToolCall(name="search", arguments={"query": "docs"})]],
     )
     tool.simulate(search, result=["doc1"])
 
@@ -307,12 +326,12 @@ def test_anthropic_with_dataclass(construct: Construct) -> None:
 # ============================================================================
 
 
-def test_gemini_single_tool_call(construct: Construct) -> None:
-    """Gemini: Single tool call using tc() helper."""
+@tenro
+def test_gemini_single_tool_call() -> None:
+    """Gemini: Single tool call using ToolCall() helper."""
     llm.simulate(
         Provider.GEMINI,
-        response="Summary of results",
-        tool_calls=[tc(search, query="AI trends")],
+        responses=[["Summary of results", ToolCall(search, query="AI trends")]],
     )
     tool.simulate(search, result=["trend1", "trend2"])
 
@@ -323,14 +342,17 @@ def test_gemini_single_tool_call(construct: Construct) -> None:
     assert llm.calls()[0].provider == "gemini"
 
 
-def test_gemini_multiple_tool_calls(construct: Construct) -> None:
+@tenro
+def test_gemini_multiple_tool_calls() -> None:
     """Gemini: Multiple tool calls in a single response."""
     llm.simulate(
         Provider.GEMINI,
-        response="Weather and search results",
-        tool_calls=[
-            tc(search, query="news"),
-            tc(get_weather, city="Tokyo"),
+        responses=[
+            [
+                "Weather and search results",
+                ToolCall(search, query="news"),
+                ToolCall(get_weather, city="Tokyo"),
+            ]
         ],
     )
     tool.simulate(search, result=["news1"])
@@ -342,12 +364,12 @@ def test_gemini_multiple_tool_calls(construct: Construct) -> None:
     tool.verify_many(count=2)
 
 
-def test_gemini_with_dataclass(construct: Construct) -> None:
-    """Gemini: ToolCall dataclass for string names."""
+@tenro
+def test_gemini_with_string_name() -> None:
+    """Gemini: ToolCall with string name."""
     llm.simulate(
         Provider.GEMINI,
-        response="Results found",
-        tool_calls=[ToolCall(name="search", arguments={"query": "gemini"})],
+        responses=[["Results found", ToolCall(name="search", arguments={"query": "gemini"})]],
     )
     tool.simulate(search, result=["result"])
 
@@ -370,8 +392,7 @@ class TestOpenAIToolCalls(unittest.TestCase):
         with Construct() as construct:
             llm.simulate(
                 Provider.OPENAI,
-                response="Results found",
-                tool_calls=[tc(search, query="unittest query")],
+                responses=[["Results found", ToolCall(search, query="unittest query")]],
             )
             tool.simulate(search, result=["result"])
 
@@ -386,10 +407,12 @@ class TestOpenAIToolCalls(unittest.TestCase):
         with Construct() as construct:
             llm.simulate(
                 Provider.OPENAI,
-                response="Summary",
-                tool_calls=[
-                    tc(search, query="test"),
-                    tc(get_weather, city="Boston"),
+                responses=[
+                    [
+                        "Summary",
+                        ToolCall(search, query="test"),
+                        ToolCall(get_weather, city="Boston"),
+                    ]
                 ],
             )
             tool.simulate(search, result=["r"])
@@ -414,8 +437,7 @@ class TestAnthropicToolCalls(unittest.TestCase):
         with Construct() as construct:
             llm.simulate(
                 Provider.ANTHROPIC,
-                response="Found results",
-                tool_calls=[tc(search, query="anthropic test")],
+                responses=[["Found results", ToolCall(search, query="anthropic test")]],
             )
             tool.simulate(search, result=["result"])
 
@@ -424,13 +446,12 @@ class TestAnthropicToolCalls(unittest.TestCase):
             tool.verify(search)
             construct.verify_llm(Provider.ANTHROPIC)
 
-    def test_with_dataclass(self) -> None:
-        """Anthropic unittest: ToolCall dataclass."""
+    def test_with_string_name(self) -> None:
+        """Anthropic unittest: ToolCall with string name."""
         with Construct() as construct:
             llm.simulate(
                 Provider.ANTHROPIC,
-                response="Done",
-                tool_calls=[ToolCall(name="search", arguments={"query": "data"})],
+                responses=[["Done", ToolCall(name="search", arguments={"query": "data"})]],
             )
             tool.simulate(search, result=["data1"])
 
@@ -453,8 +474,7 @@ class TestGeminiToolCalls(unittest.TestCase):
         with Construct() as construct:
             llm.simulate(
                 Provider.GEMINI,
-                response="Summary ready",
-                tool_calls=[tc(search, query="gemini test")],
+                responses=[["Summary ready", ToolCall(search, query="gemini test")]],
             )
             tool.simulate(search, result=["result"])
 
@@ -463,13 +483,12 @@ class TestGeminiToolCalls(unittest.TestCase):
             tool.verify(search)
             construct.verify_llm(Provider.GEMINI)
 
-    def test_with_dataclass(self) -> None:
-        """Gemini unittest: ToolCall dataclass."""
+    def test_with_string_name(self) -> None:
+        """Gemini unittest: ToolCall with string name."""
         with Construct() as construct:
             llm.simulate(
                 Provider.GEMINI,
-                response="Complete",
-                tool_calls=[ToolCall(name="search", arguments={"query": "info"})],
+                responses=[["Complete", ToolCall(name="search", arguments={"query": "info"})]],
             )
             tool.simulate(search, result=["info1"])
 
@@ -484,7 +503,8 @@ class TestGeminiToolCalls(unittest.TestCase):
 # ============================================================================
 
 
-def test_llm_requests_nonexistent_tool(construct: Construct) -> None:
+@tenro
+def test_llm_requests_nonexistent_tool() -> None:
     """Test agent handling of LLM requesting a tool that doesn't exist.
 
     This pattern is useful for testing defensive programming - ensuring your
@@ -493,8 +513,12 @@ def test_llm_requests_nonexistent_tool(construct: Construct) -> None:
     """
     llm.simulate(
         Provider.OPENAI,
-        response="I'll use the magic_tool to help",
-        tool_calls=[ToolCall(name="nonexistent_magic_tool", arguments={"spell": "abracadabra"})],
+        responses=[
+            [
+                "I'll use the magic_tool to help",
+                ToolCall(name="nonexistent_magic_tool", arguments={"spell": "abracadabra"}),
+            ]
+        ],
     )
 
     defensive_agent.run("Do something magical")
@@ -505,7 +529,8 @@ def test_llm_requests_nonexistent_tool(construct: Construct) -> None:
     assert llm_call.response is not None
 
 
-def test_llm_requests_tool_with_invalid_args(construct: Construct) -> None:
+@tenro
+def test_llm_requests_tool_with_invalid_args() -> None:
     """Test agent handling of LLM providing invalid arguments to a tool.
 
     Another defensive programming pattern - the LLM might call a real tool
@@ -513,11 +538,134 @@ def test_llm_requests_tool_with_invalid_args(construct: Construct) -> None:
     """
     llm.simulate(
         Provider.OPENAI,
-        response="Searching with limit",
-        tool_calls=[ToolCall(name="search", arguments={"query": "test", "limit": "not_a_number"})],
+        responses=[
+            [
+                "Searching with limit",
+                ToolCall(name="search", arguments={"query": "test", "limit": "not_a_number"}),
+            ]
+        ],
     )
     tool.simulate(search, result=["result"])
 
     openai_search_agent.run("Search with bad args")
 
     llm.verify(Provider.OPENAI)
+
+
+# ============================================================================
+# LLMResponse with Blocks (Interleaving)
+# ============================================================================
+# Text blocks represent the model's reasoning BEFORE/WHILE making tool call
+# requests. The model hasn't seen tool results yet - those come in a later turn.
+#
+# KEY DISTINCTION:
+#   responses=[A, B, C]           → 3 separate LLM calls (3 turns)
+#   responses=[LLMResponse([A, B, C])]  → 1 LLM call with interleaved content
+
+
+@tenro
+def test_single_turn_vs_multiple_turns() -> None:
+    """Outer list = number of LLM calls. LLMResponse = content within one call.
+
+    This is the key distinction: responses=[A, B] means TWO LLM calls,
+    while responses=[LLMResponse([A, B])] means ONE call with both items.
+    """
+    # TWO separate LLM calls
+    llm.simulate(Provider.OPENAI, responses=["First", "Second"])
+    multi_turn_agent.run("topic")
+    llm.verify_many(Provider.OPENAI, count=2)
+
+
+@tenro
+def test_anthropic_interleaved_single_turn() -> None:
+    """Anthropic: ONE call with interleaved text + tool calls.
+
+    Anthropic preserves block order. Text blocks are the model's reasoning
+    as it decides which tools to call - all in a single atomic response.
+    """
+    llm.simulate(
+        Provider.ANTHROPIC,
+        responses=[
+            LLMResponse(
+                [
+                    "I'll search for info.",
+                    ToolCall(search, query="quantum"),
+                    "Also checking weather.",
+                    ToolCall(get_weather, city="NYC"),
+                ]
+            )
+        ],
+    )
+    tool.simulate(search, result=["quantum info"])
+    tool.simulate(get_weather, result={"temp": 72})
+
+    anthropic_multi_tool_agent.run("Research")
+
+    llm.verify_many(Provider.ANTHROPIC, count=1)  # ONE call
+    tool.verify_many(count=2)
+
+
+@tenro
+def test_gemini_interleaved_single_turn() -> None:
+    """Gemini: ONE call with interleaved content. Block order preserved."""
+    llm.simulate(
+        Provider.GEMINI,
+        responses=[LLMResponse(["Searching now.", ToolCall(search, query="AI trends")])],
+    )
+    tool.simulate(search, result=["trend1"])
+
+    gemini_search_agent.run("Find trends")
+
+    llm.verify_many(Provider.GEMINI, count=1)
+    tool.verify(search)
+
+
+@tenro
+def test_openai_blocks_flattened() -> None:
+    """OpenAI: Blocks are flattened (no interleaving support).
+
+    OpenAI Chat API concatenates text blocks and extracts tool calls
+    to a separate array. Order within the turn is lost, but it still works.
+    """
+    llm.simulate(
+        Provider.OPENAI,
+        responses=[LLMResponse(["First.", ToolCall(search, query="test"), "Second."])],
+    )
+    tool.simulate(search, result=["result"])
+
+    openai_search_agent.run("Search")
+
+    llm.verify(Provider.OPENAI)
+    tool.verify(search)
+
+
+@tenro
+def test_llmresponse_tool_calls_only() -> None:
+    """LLMResponse with tool calls only (no text)."""
+    llm.simulate(
+        Provider.ANTHROPIC,
+        responses=[LLMResponse([ToolCall(search, query="silent")])],
+    )
+    tool.simulate(search, result=["found"])
+
+    anthropic_search_agent.run("Quick search")
+
+    llm.verify(Provider.ANTHROPIC)
+    tool.verify(search)
+
+
+@tenro
+def test_list_shorthand_equals_llmresponse() -> None:
+    """List shorthand is equivalent to LLMResponse(blocks=[...])."""
+    llm.simulate(
+        Provider.ANTHROPIC,
+        responses=[
+            ["Reasoning", ToolCall(search, query="test")],  # shorthand
+        ],
+    )
+    tool.simulate(search, result=["result"])
+
+    anthropic_search_agent.run("Test")
+
+    llm.verify(Provider.ANTHROPIC)
+    tool.verify(search)

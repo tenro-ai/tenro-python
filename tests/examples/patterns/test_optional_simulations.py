@@ -3,13 +3,11 @@
 
 """Pattern: Optional simulations for conditional branches.
 
-Shows how to test code paths that may or may not be taken.
-This pattern is useful for testing caching, feature flags, and error paths.
-
-Note: These tests demonstrate Tenro's tool simulation features for conditional
-code paths. LLM is not used because the pattern being tested is about
-tool invocation based on application logic, not LLM decisions.
+Use `optional=True` when a tool may or may not be called depending on the code
+path. Without this flag, Tenro fails if a simulated tool is never invoked.
 """
+
+from __future__ import annotations
 
 from examples.myapp import (
     check_cache,
@@ -18,12 +16,14 @@ from examples.myapp import (
 )
 
 from tenro.simulate import tool
+from tenro.testing import tenro
 
 
-def test_cache_hit_skips_api(construct) -> None:
+@tenro
+def test_cache_hit_skips_api() -> None:
     """When cache returns data, API is not called."""
     tool.simulate(check_cache, result={"data": "cached"})
-    # Note: Don't simulate fetch_from_api - it won't be called
+    tool.simulate(fetch_from_api, result={"data": "fresh"}, optional=True)
 
     result = get_data_with_cache("key123", use_cache=True)
 
@@ -32,7 +32,8 @@ def test_cache_hit_skips_api(construct) -> None:
     tool.verify_never(fetch_from_api)
 
 
-def test_cache_miss_calls_api(construct) -> None:
+@tenro
+def test_cache_miss_calls_api() -> None:
     """When cache returns None, API is called."""
     tool.simulate(check_cache, result=None)
     tool.simulate(fetch_from_api, result={"data": "fresh"})
@@ -44,10 +45,11 @@ def test_cache_miss_calls_api(construct) -> None:
     tool.verify_many(fetch_from_api, count=1)
 
 
-def test_cache_bypass_skips_check(construct) -> None:
+@tenro
+def test_cache_bypass_skips_check() -> None:
     """When cache is disabled, cache check is skipped."""
+    tool.simulate(check_cache, result={"data": "cached"}, optional=True)
     tool.simulate(fetch_from_api, result={"data": "fresh"})
-    # Note: Don't simulate check_cache - it won't be called
 
     result = get_data_with_cache("key123", use_cache=False)
 

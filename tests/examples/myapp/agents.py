@@ -12,7 +12,11 @@ from __future__ import annotations
 import json
 from typing import Any, ClassVar
 
-import openai
+from examples.myapp.clients import (
+    get_anthropic_client,
+    get_gemini_client,
+    get_openai_client,
+)
 from examples.myapp.tools import (
     call_api,
     delete_all_records,
@@ -42,12 +46,12 @@ def generate_response(system_prompt: str, user_message: str) -> str:
 
     Args:
         system_prompt: System context for the model.
-        user_message: User's question or input.
+        user_message: Question or input text.
 
     Returns:
         Model's response text.
     """
-    client = openai.OpenAI(api_key="test-key")
+    client = get_openai_client()
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -61,7 +65,7 @@ def generate_response(system_prompt: str, user_message: str) -> str:
 @link_llm(Provider.OPENAI)
 def call_openai(prompt: str) -> str:
     """Call OpenAI API."""
-    response = openai.OpenAI(api_key="test-key").chat.completions.create(
+    response = get_openai_client().chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
     )
@@ -71,7 +75,7 @@ def call_openai(prompt: str) -> str:
 @link_llm(Provider.OPENAI)
 def chat(message: str) -> str:
     """Simple chat interface to OpenAI."""
-    response = openai.OpenAI(api_key="test-key").chat.completions.create(
+    response = get_openai_client().chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": message}],
     )
@@ -81,7 +85,7 @@ def chat(message: str) -> str:
 @link_llm(Provider.OPENAI)
 def call_llm(prompt: str) -> str:
     """Generic LLM call."""
-    response = openai.OpenAI(api_key="test-key").chat.completions.create(
+    response = get_openai_client().chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
     )
@@ -91,22 +95,21 @@ def call_llm(prompt: str) -> str:
 @link_llm(Provider.ANTHROPIC)
 def call_anthropic(prompt: str) -> str:
     """Call Anthropic API."""
-    import anthropic
+    from anthropic.types import TextBlock
 
-    response = anthropic.Anthropic(api_key="test-key").messages.create(
+    response = get_anthropic_client().messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text if response.content else ""
+    text_blocks = [b for b in response.content if isinstance(b, TextBlock)]
+    return text_blocks[0].text if text_blocks else ""
 
 
 @link_llm(Provider.GEMINI)
 def call_gemini(prompt: str) -> str:
     """Call Gemini API."""
-    from google import genai
-
-    client = genai.Client(api_key="test-key")
+    client = get_gemini_client()
     response = client.models.generate_content(
         model="gemini-2.0-flash",
         contents=prompt,
@@ -123,7 +126,7 @@ def chat_with_tools(
 
     Returns dict with 'content' and optional 'tool_calls'.
     """
-    client = openai.OpenAI(api_key="test-key")
+    client = get_openai_client()
     kwargs: dict[str, Any] = {
         "model": "gpt-4o-mini",
         "messages": messages,
@@ -181,7 +184,7 @@ class RAGPipeline:
         """Process a question with RAG.
 
         Args:
-            question: User's question.
+            question: The question to answer.
             topic: Topic to retrieve documents for.
 
         Returns:
@@ -345,7 +348,7 @@ class ConversationAgent:
         Returns:
             List of assistant responses.
         """
-        client = openai.OpenAI(api_key="test-key")
+        client = get_openai_client()
         messages: list[dict] = [
             {"role": "system", "content": "You are a helpful coding assistant."}
         ]

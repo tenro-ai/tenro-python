@@ -4,7 +4,7 @@
 """Tenro Python SDK for local AI agent testing and evaluation.
 
 Examples:
-    >>> from tenro import Construct, Provider, tc, ToolCall
+    >>> from tenro import Construct, Provider, ToolCall
     >>> from tenro import link_llm, link_tool, link_agent
     >>> from tenro.simulate import llm, tool, agent
     >>> from tenro.errors import TenroError
@@ -18,12 +18,13 @@ from importlib.metadata import version
 from tenro.construct import Construct
 from tenro.evals import EvalResult
 from tenro.linking import link_agent, link_llm, link_tool
+from tenro.llm_response import LLMResponse, RawLLMResponse
 from tenro.providers import Provider
 from tenro.tool_calls import ToolCall, tc
 
 __version__ = version("tenro")
 
-_SUBMODULES = {"errors", "evals", "spans"}
+_SUBMODULES = {"errors", "evals", "spans", "testing"}
 
 
 def __getattr__(name: str) -> object:
@@ -41,6 +42,10 @@ def __getattr__(name: str) -> object:
         import tenro.spans as spans
 
         return spans
+    if name == "testing":
+        import tenro.testing as testing
+
+        return testing
     raise AttributeError(f"module 'tenro' has no attribute {name!r}")
 
 
@@ -52,7 +57,9 @@ def __dir__() -> list[str]:
 __all__ = [
     "Construct",
     "EvalResult",
+    "LLMResponse",
     "Provider",
+    "RawLLMResponse",
     "ToolCall",
     "link_agent",
     "link_llm",

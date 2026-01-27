@@ -160,33 +160,34 @@ class HttpInterceptor:
             tuple[dict[str, Any] | Exception, str | None, list[dict[str, Any]]]
         ] = []
         for item in items:
-            tool_call_dicts: list[dict[str, Any]] = []
-            if item.tool_calls:
-                for tc in item.tool_calls:
-                    if hasattr(tc, "name"):
-                        # SimToolCall object - use call_id attribute
+            if isinstance(item.content, Exception):
+                response_tuples.append((item.content, None, []))
+            elif item.raw_payload is not None:
+                # RawLLMResponse: use payload directly without interpretation
+                response_tuples.append((item.raw_payload, None, []))
+            else:
+                # Extract text and tool_calls from blocks for logging/callbacks
+                blocks = item.blocks or []
+                text_parts = [b for b in blocks if isinstance(b, str)]
+                response_text = "".join(text_parts) if text_parts else ""
+
+                tool_call_dicts: list[dict[str, Any]] = []
+                for b in blocks:
+                    if hasattr(b, "name") and hasattr(b, "arguments"):
                         tool_call_dicts.append(
                             {
-                                "id": getattr(tc, "call_id", None),
-                                "name": tc.name,
-                                "arguments": getattr(tc, "arguments", {}),
+                                "id": getattr(b, "call_id", None),
+                                "name": b.name,
+                                "arguments": b.arguments,
                             }
                         )
-                    elif isinstance(tc, dict):
-                        tool_call_dicts.append(tc)
 
-            if isinstance(item.content, Exception):
-                response_tuples.append((item.content, None, tool_call_dicts))
-            else:
                 resp_kwargs = dict(kwargs)
-                if item.tool_calls:
-                    resp_kwargs["tool_calls"] = ProviderSchemaFactory.create_tool_calls(
-                        format_provider, item.tool_calls
-                    )
-                json_response = self._build_response_json(
-                    format_provider, item.content, **resp_kwargs
+                response = ProviderSchemaFactory.create_response_from_blocks(
+                    format_provider, blocks, **resp_kwargs
                 )
-                response_tuples.append((json_response, item.content, tool_call_dicts))
+                json_response = dict(response)
+                response_tuples.append((json_response, response_text, tool_call_dicts))
 
         self._response_queue[provider] = iter(response_tuples)
 

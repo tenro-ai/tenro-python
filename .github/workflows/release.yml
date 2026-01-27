@@ -1,0 +1,245 @@
+name: Release
+run-name: Release v${{ inputs.version }}${{ inputs.dry_run && ' (dry run)' || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 0.2.1)"
+        required: true
+        type: string
+      dry_run:
+        description: "Dry run (validate and build, skip publish)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      tag: ${{ steps.validate.outputs.tag }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Validate version
+        id: validate
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="v${VERSION}"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            echo "Expected: X.Y.Z or X.Y.Z{a|b|rc}N (e.g., 0.2.1, 1.0.0a1)"
+            exit 1
+          fi
+
+          PYPROJECT_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [[ "$VERSION" != "$PYPROJECT_VERSION" ]]; then
+            echo "::error::Version mismatch!"
+            echo "  Input version: $VERSION"
+            echo "  pyproject.toml: $PYPROJECT_VERSION"
+            echo ""
+            echo "Ensure the synced code has the correct version."
+            exit 1
+          fi
+
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists"
+            echo "If this is a re-release attempt, the tag must be deleted first."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "✓ Validated: $VERSION (tag: $TAG)"
+
+  verify-ci:
+    name: Verify CI Passed
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check CI status on HEAD
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get the CI workflow conclusion for current commit
+          CONCLUSION=$(gh api repos/${{ github.repository }}/actions/workflows/ci.yml/runs \
+            --jq ".workflow_runs[] | select(.head_sha == \"${{ github.sha }}\") | .conclusion" \
+            | head -1)
+
+          if [[ "$CONCLUSION" != "success" ]]; then
+            echo "::error::CI has not passed on this commit"
+            echo "CI conclusion: ${CONCLUSION:-not found}"
+            echo ""
+            echo "Ensure CI passes on main before releasing."
+            exit 1
+          fi
+
+          echo "✓ CI passed on commit ${{ github.sha }}"
+
+  build:
+    name: Build
+    needs: [validate, verify-ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      wheel_version: ${{ steps.verify.outputs.wheel_version }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: |
+          uv python install 3.12
+          uv venv --python 3.12
+
+      - name: Build package
+        run: uv build
+
+      - name: Verify wheel version matches tag
+        id: verify
+        run: |
+          TAG_VERSION="${{ needs.validate.outputs.version }}"
+
+          WHEEL=$(ls -1 dist/*.whl | sort | tail -1)
+          WHEEL_VERSION=$(unzip -p "$WHEEL" "*/METADATA" | grep "^Version:" | cut -d' ' -f2)
+
+          if [ "$TAG_VERSION" != "$WHEEL_VERSION" ]; then
+            echo "::error::Wheel version mismatch!"
+            echo "  Tag version:   $TAG_VERSION"
+            echo "  Wheel version: $WHEEL_VERSION"
+            exit 1
+          fi
+
+          echo "wheel_version=$WHEEL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "✓ Wheel version matches: $WHEEL_VERSION"
+
+      - name: Build summary
+        run: |
+          echo "## Build Artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| File | Size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|------|" >> "$GITHUB_STEP_SUMMARY"
+          for f in dist/*; do
+            SIZE=$(du -h "$f" | cut -f1)
+            echo "| $(basename "$f") | $SIZE |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: dist
+          path: dist/
+          retention-days: 5
+
+  dry-run:
+    name: Dry Run Summary
+    needs: [validate, build]
+    if: ${{ github.event.inputs.dry_run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dist
+          path: dist/
+
+      - name: Dry run summary
+        run: |
+          echo "## Dry Run Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Validated and built successfully. Would have released:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version:** ${{ needs.validate.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Tag:** ${{ needs.validate.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ls -la dist/ >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "To release for real, re-run with dry_run=false" >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Release
+    needs: [validate, build]
+    if: ${{ github.event.inputs.dry_run != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: true  # Needed for tag push
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create tag
+        run: |
+          TAG="${{ needs.validate.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+          echo "✓ Created and pushed tag: $TAG"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ needs.validate.outputs.tag }}"
+          VERSION="${{ needs.validate.outputs.version }}"
+
+          if [[ -f ".github/RELEASE_NOTES.md" ]]; then
+            echo "Using synced release notes"
+            NOTES_FILE=".github/RELEASE_NOTES.md"
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file "$NOTES_FILE" \
+              dist/*
+          else
+            echo "No release notes found, using auto-generated"
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              dist/*
+          fi
+
+          echo "✓ Created GitHub Release: $TAG"
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
+
+      - name: Release summary
+        run: |
+          echo "## Release Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version:** ${{ needs.validate.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Tag:** ${{ needs.validate.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **PyPI:** https://pypi.org/project/tenro/${{ needs.validate.outputs.version }}/" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **GitHub Release:** ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.validate.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"

@@ -1,17 +1,21 @@
 # Copyright 2026 Tenro.ai
 # SPDX-License-Identifier: Apache-2.0
 
-"""LLM simulation tests."""
+"""LLM simulation tests.
+
+Tests marked with `openai_integration` require LLM client libraries (openai, anthropic)
+and are skipped in clean-room testing.
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import pytest
-from myapp.agents import chat_completion
 
 from tenro import Provider
 from tenro.simulate import llm
+from tenro.testing import tenro
 
 if TYPE_CHECKING:
     import anthropic
@@ -20,6 +24,7 @@ if TYPE_CHECKING:
     from tenro import Construct
 
 
+@pytest.mark.openai_integration
 @pytest.mark.parametrize(
     ("provider", "client_fixture"),
     [
@@ -30,9 +35,9 @@ if TYPE_CHECKING:
 class TestLLMSimulation:
     """LLM simulation and verification."""
 
+    @tenro
     def test_single_response(
         self,
-        construct: Construct,
         provider: Provider,
         client_fixture: str,
         openai_client: openai.OpenAI,
@@ -59,9 +64,9 @@ class TestLLMSimulation:
         call = llm.verify(provider)
         assert call.simulated is True
 
+    @tenro
     def test_sequential_responses(
         self,
-        construct: Construct,
         provider: Provider,
         client_fixture: str,
         openai_client: openai.OpenAI,
@@ -93,11 +98,15 @@ class TestLLMSimulation:
         assert all(c.simulated for c in calls)
 
 
+@pytest.mark.openai_integration
 class TestLinkedLLM:
     """Tests for @link_llm decorated functions."""
 
-    def test_linked_llm_function(self, construct: Construct) -> None:
+    @tenro
+    def test_linked_llm_function(self) -> None:
         """Simulate LLM response via @link_llm decorated function."""
+        from myapp.llm_functions import chat_completion
+
         llm.simulate(Provider.OPENAI, response="Linked response")
 
         result = chat_completion("Test prompt")
@@ -107,12 +116,13 @@ class TestLinkedLLM:
         assert call.simulated is True
 
 
+@pytest.mark.openai_integration
 class TestCustomProvider:
     """Custom provider registration and simulation."""
 
     def test_custom_provider_mistral(self, construct: Construct) -> None:
         """Register and simulate a custom provider (Mistral)."""
-        import openai
+        from examples.myapp.clients import get_openai_client
 
         from tenro._construct.http.registry import ProviderConfig, ProviderRegistry
 
@@ -133,10 +143,7 @@ class TestCustomProvider:
         llm.simulate("mistral", response="Hello from Mistral!")
 
         # Use OpenAI client with Mistral base URL
-        client = openai.OpenAI(
-            api_key="test-key",
-            base_url="https://api.mistral.ai/v1",
-        )
+        client = get_openai_client(base_url="https://api.mistral.ai/v1")
         resp = client.chat.completions.create(
             model="mistral-small",
             messages=[{"role": "user", "content": "Hi"}],

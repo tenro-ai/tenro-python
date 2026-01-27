@@ -1,24 +1,15 @@
 # Copyright 2026 Tenro.ai
 # SPDX-License-Identifier: Apache-2.0
 
-"""Sample agents and tools for testing."""
+"""Sample agents and tools for testing.
+
+Note: LLM functions requiring client libraries (openai) are in llm_agents.py
+to avoid import errors in clean-room tests.
+"""
 
 from __future__ import annotations
 
-import openai
-
-from tenro import link_agent, link_llm, link_tool
-
-
-@link_llm
-def chat_completion(prompt: str) -> str:
-    """Make a chat completion call."""
-    client = openai.OpenAI(api_key="test-key")
-    resp = client.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return resp.choices[0].message.content or ""
+from tenro import link_agent, link_tool
 
 
 @link_tool
@@ -34,12 +25,18 @@ def fetch(url: str) -> str:
 
 
 @link_agent
-def researcher(task: str) -> str:
-    """Research agent."""
-    raise NotImplementedError("Should be simulated")
+class Researcher:
+    """Research agent that finds information."""
+
+    def run(self, task: str) -> str:
+        """Execute research task."""
+        raise NotImplementedError("Should be simulated")
 
 
 @link_agent
-def writer(prompt: str) -> str:
-    """Writer agent."""
-    raise NotImplementedError("Should be simulated")
+class Writer:
+    """Writer agent that generates content."""
+
+    def run(self, prompt: str) -> str:
+        """Execute writing task."""
+        raise NotImplementedError("Should be simulated")

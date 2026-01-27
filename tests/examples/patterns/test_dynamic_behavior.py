@@ -7,14 +7,17 @@ Shows how to make simulated responses depend on input arguments.
 Uses realistic LLM-driven agent patterns.
 """
 
+from __future__ import annotations
+
 from examples.myapp import WeatherAgent, get_weather
 
-from tenro import Provider
+from tenro import Provider, ToolCall
 from tenro.simulate import llm, tool
-from tenro.tool_calls import tc
+from tenro.testing import tenro
 
 
-def test_input_dependent_responses(construct) -> None:
+@tenro
+def test_input_dependent_responses() -> None:
     """Responses vary based on input arguments using side_effect."""
 
     # side_effect: function receives the same args as the real function
@@ -29,8 +32,8 @@ def test_input_dependent_responses(construct) -> None:
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {"text": "", "tool_calls": [tc("get_weather", city="San Francisco")]},
-            {"text": "San Francisco is 65°F and foggy."},
+            [ToolCall("get_weather", city="San Francisco")],
+            "San Francisco is 65°F and foggy.",
         ],
     )
 
@@ -41,7 +44,8 @@ def test_input_dependent_responses(construct) -> None:
     llm.verify_many(Provider.OPENAI, count=2)
 
 
-def test_side_effect_with_state(construct) -> None:
+@tenro
+def test_side_effect_with_state() -> None:
     """Side effect can maintain state across multiple tool calls."""
     call_count = {"n": 0}
 
@@ -53,14 +57,11 @@ def test_side_effect_with_state(construct) -> None:
     llm.simulate(
         Provider.OPENAI,
         responses=[
-            {
-                "text": "",
-                "tool_calls": [
-                    tc("get_weather", city="NYC"),
-                    tc("get_weather", city="LA"),
-                ],
-            },
-            {"text": "NYC is 71°F, LA is 72°F."},
+            [
+                ToolCall("get_weather", city="NYC"),
+                ToolCall("get_weather", city="LA"),
+            ],
+            "NYC is 71°F, LA is 72°F.",
         ],
     )
 
