@@ -1,49 +1,19 @@
-🎉 **New @tenro decorator and LLM tool call API**
+🎉 **OTel-aligned span model**
 
 ✨ **Added**
 
-- **`@tenro` decorator**: Simplified test setup - no explicit fixture parameter needed:
-  ```python
-  from tenro.testing import tenro
-  from tenro.simulate import llm
+- **OTel-aligned spans**: Spans now include `trace_id`, `parent_id`, `status`, and nanosecond-precision timestamps following OpenTelemetry semantic conventions
+- **`SpanHandler` protocol**: Pluggable interface for custom span backends
 
-  @tenro
-  def test_my_agent():
-      llm.simulate(response="Hello!")
-      result = my_agent.run("prompt")
-  ```
+⚡ **Changed**
 
-- **`LLMResponse`**: Ordered sequence of text and tool calls with full interleaving support:
-  ```python
-  from tenro import LLMResponse, ToolCall
-
-  llm.simulate(Provider.ANTHROPIC, responses=[
-      LLMResponse(blocks=["Let me search", ToolCall(search, query="AI")])
-  ])
-  ```
-
-- **`RawLLMResponse`**: Raw provider JSON passthrough for edge cases:
-  ```python
-  from tenro import RawLLMResponse
-
-  llm.simulate(Provider.OPENAI, responses=[
-      RawLLMResponse(payload={"choices": [{"message": {"content": "Hi"}}]})
-  ])
-  ```
-
-- **`ToolCall` smart constructor**: Direct tool call simulation without dict wrappers:
-  ```python
-  # Before: {"tool_calls": [ToolCall(search, query="AI")]}
-  # After:
-  llm.simulate(Provider.OPENAI, responses=[
-      ToolCall(search, query="AI")
-  ])
-  ```
+- **Nanosecond timestamps**: Span timestamps now use `int` nanoseconds (previously `float` seconds)
+- **Lazy-loaded imports**: `import tenro` no longer eagerly imports all submodules, reducing startup time
 
 ---
 
 **Installation**
 
 ```bash
-pip install tenro==0.2.1
+pip install tenro==0.2.2
 ```

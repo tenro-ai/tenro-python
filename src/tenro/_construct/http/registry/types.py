@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import Any, Protocol
 
 
@@ -35,7 +35,7 @@ class Provider(StrEnum):
 _BUILTIN_PROVIDER_VALUES: frozenset[str] = frozenset(p.value for p in Provider)
 
 
-class Capability(str, Enum):
+class Capability(StrEnum):
     """Provider/endpoint capabilities.
 
     Attributes:

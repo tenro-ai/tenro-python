@@ -13,6 +13,8 @@ in your source code.
 
 from __future__ import annotations
 
+import os
+
 from examples.experimental.langchain.myapp.research_agent_anthropic import (
     WebResearchAgentAnthropic,
 )
@@ -27,6 +29,9 @@ from langchain_community import tools as lc_tools
 from tenro import Provider
 from tenro.simulate import agent, llm, register, tool
 from tenro.testing import tenro
+
+# langchain-google-genai validates API key at init time (unlike OpenAI/Anthropic)
+os.environ.setdefault("GOOGLE_API_KEY", "test-key-for-simulation")
 
 
 @tenro

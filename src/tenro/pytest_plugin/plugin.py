@@ -287,3 +287,8 @@ def pytest_unconfigure(config: Config) -> None:
             _patch_engine_installed = False
         except ImportError:
             pass
+
+    # Clear OTel config so it doesn't leak between test runs
+    from tenro._init import reset
+
+    reset()

@@ -13,45 +13,115 @@ Examples:
 
 from __future__ import annotations
 
-from importlib.metadata import version
+_SUBMODULES = ("errors", "evals", "spans", "testing")
 
-from tenro.construct import Construct
-from tenro.evals import EvalResult
-from tenro.linking import link_agent, link_llm, link_tool
-from tenro.llm_response import LLMResponse, RawLLMResponse
-from tenro.providers import Provider
-from tenro.tool_calls import ToolCall, tc
 
-__version__ = version("tenro")
+def _load_symbol(name: str) -> object | None:
+    """Load a public symbol by name.
 
-_SUBMODULES = {"errors", "evals", "spans", "testing"}
+    Args:
+        name: Symbol name to import.
+
+    Returns:
+        The imported symbol, or None if not found.
+    """
+    if name == "Construct":
+        from tenro.construct import Construct
+
+        return Construct
+    if name == "EvalResult":
+        from tenro.evals import EvalResult
+
+        return EvalResult
+    if name == "LLMResponse":
+        from tenro.llm_response import LLMResponse
+
+        return LLMResponse
+    if name == "RawLLMResponse":
+        from tenro.llm_response import RawLLMResponse
+
+        return RawLLMResponse
+    if name == "Provider":
+        from tenro.providers import Provider
+
+        return Provider
+    if name == "ToolCall":
+        from tenro.tool_calls import ToolCall
+
+        return ToolCall
+    if name == "init":
+        from tenro._init import init
+
+        return init
+    if name == "tc":
+        from tenro.tool_calls import tc
+
+        return tc
+    if name == "link_agent":
+        from tenro.linking import link_agent
+
+        return link_agent
+    if name == "link_llm":
+        from tenro.linking import link_llm
+
+        return link_llm
+    if name == "link_tool":
+        from tenro.linking import link_tool
+
+        return link_tool
+    return None
+
+
+def _load_submodule(name: str) -> object | None:
+    """Load a submodule by name.
+
+    Args:
+        name: Submodule name to import.
+
+    Returns:
+        The imported module, or None if not found.
+    """
+    if name == "errors":
+        import tenro.errors
+
+        return tenro.errors
+    if name == "evals":
+        import tenro.evals
+
+        return tenro.evals
+    if name == "spans":
+        import tenro.spans
+
+        return tenro.spans
+    if name == "testing":
+        import tenro.testing
+
+        return tenro.testing
+    return None
 
 
 def __getattr__(name: str) -> object:
-    """Import submodules on attribute access."""
-    # Explicit branches to avoid dynamic import_module(variable)
-    if name == "errors":
-        import tenro.errors as errors
+    """Lazy-load public symbols and submodules on first access."""
+    val = _load_symbol(name)
+    if val is None:
+        val = _load_submodule(name)
+    if val is not None:
+        globals()[name] = val
+        return val
 
-        return errors
-    if name == "evals":
-        import tenro.evals as evals
+    if name == "__version__":
+        from importlib.metadata import version
 
-        return evals
-    if name == "spans":
-        import tenro.spans as spans
+        v = version("tenro")
+        globals()["__version__"] = v
+        return v
 
-        return spans
-    if name == "testing":
-        import tenro.testing as testing
-
-        return testing
     raise AttributeError(f"module 'tenro' has no attribute {name!r}")
 
 
 def __dir__() -> list[str]:
     """List available module attributes."""
-    return sorted(list(__all__) + list(_SUBMODULES))
+    return sorted(list(__all__) + list(_SUBMODULES) + ["__version__"])
 
 
 __all__ = [
@@ -61,6 +131,7 @@ __all__ = [
     "Provider",
     "RawLLMResponse",
     "ToolCall",
+    "init",
     "link_agent",
     "link_llm",
     "link_tool",

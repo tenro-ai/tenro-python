@@ -9,14 +9,12 @@ LLMCall spans are created by HTTP interception, not by this module.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from uuid_utils import uuid7
-
 from tenro._core.spans import AgentRun, ToolCall
+from tenro.linking.span_factories import create_agent_span, create_tool_span
 
 if TYPE_CHECKING:
     from tenro._core.lifecycle_manager import LifecycleManager
@@ -53,15 +51,7 @@ class SpanLinker:
         Yields:
             Mutable AgentRun span for direct modification.
         """
-        span = AgentRun(
-            id=str(uuid7()),
-            trace_id=str(uuid7()),
-            start_time=time.time(),
-            target_path=name,
-            display_name=name,
-            input_data=input_data,
-            kwargs=kwargs,
-        )
+        span = create_agent_span(name, name, input_data=input_data, kwargs=kwargs)
         with self._lifecycle.start_span(span):
             yield span
 
@@ -79,15 +69,7 @@ class SpanLinker:
         Yields:
             Mutable ToolCall span for direct modification.
         """
-        span = ToolCall(
-            id=str(uuid7()),
-            trace_id=str(uuid7()),
-            start_time=time.time(),
-            target_path=tool_name,
-            display_name=tool_name,
-            args=args,
-            kwargs=kwargs,
-        )
+        span = create_tool_span(tool_name, tool_name, args=args, kwargs=kwargs)
         with self._lifecycle.start_span(span):
             yield span
 

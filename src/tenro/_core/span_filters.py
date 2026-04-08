@@ -52,16 +52,15 @@ def filter_by_agent(agent: str | None, spans: list[T], agent_runs: list[AgentRun
     matching_agents = [a for a in agent_runs if a.display_name == agent or a.target_path == agent]
     if not matching_agents:
         return []
-    matching_ids = {a.id for a in matching_agents}
+    matching_ids = {a.span_id for a in matching_agents}
 
     result: list[T] = []
     for span in spans:
         if isinstance(span, AgentRunClass):
             if span.parent_agent_id in matching_ids:
                 result.append(span)
-        else:
-            if span.agent_id in matching_ids:
-                result.append(span)
+        elif span.agent_id in matching_ids:
+            result.append(span)
     return result
 
 

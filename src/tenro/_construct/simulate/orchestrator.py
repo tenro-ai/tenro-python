@@ -18,8 +18,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from uuid_utils import uuid7
-
 from tenro._construct.http.builders import ProviderSchemaFactory
 from tenro._construct.simulate.helpers import (
     normalize_result_sequence,
@@ -47,7 +45,7 @@ from tenro._construct.simulate.tracker import SimulationTracker, ToolAgentTracke
 from tenro._construct.simulate.types import ResponsesInput, SimulationType
 from tenro._core import context
 from tenro._core.response_types import ProviderResponse
-from tenro._core.spans import LLMCall
+from tenro._core.spans import LLMCall, _generate_span_id, _generate_trace_id
 from tenro.linking.metadata import get_display_name
 from tenro.llm_response import LLMResponse, RawLLMResponse
 from tenro.tool_calls import ToolCall
@@ -1141,16 +1139,19 @@ class SimulationOrchestrator:
         """
         llm_scope = context.get_nearest_llm_scope()
         return LLMCall(
-            id=str(uuid7()),
-            trace_id=str(uuid7()),
-            start_time=time.time(),
+            span_id=_generate_span_id(),
+            trace_id=_generate_trace_id(),
+            start_time=time.time_ns(),
+            span_type="llm",
+            kind="CLIENT",
+            name=f"chat {model or provider}",
             provider=provider,
             model=model,
             messages=messages,
             response=response,
             agent_name=agent_name,
             tool_calls=tool_calls,
-            llm_scope_id=llm_scope.id if llm_scope else None,
+            llm_scope_id=llm_scope.span_id if llm_scope else None,
             caller_signature=llm_scope.caller_signature if llm_scope else None,
             caller_location=llm_scope.caller_location if llm_scope else None,
         )

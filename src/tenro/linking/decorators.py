@@ -33,15 +33,11 @@ Examples:
 from __future__ import annotations
 
 import inspect
-import time
 from collections.abc import Callable
 from functools import wraps
 from typing import Any, TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
-from uuid_utils import uuid7
-
-from tenro._core.spans import AgentRun, LLMCall, LLMScope, ToolCall
 from tenro.errors import TenroError, TenroTracingWarning, warn
 from tenro.linking.constants import (
     AGENT_ENTRY_METHODS,
@@ -73,6 +69,12 @@ from tenro.linking.metadata import (
     ATTR_WRAPPED,
     find_entry_methods,
     is_directly_linked,
+)
+from tenro.linking.span_factories import (
+    create_agent_span,
+    create_llm_call_span,
+    create_llm_scope_span,
+    create_tool_span,
 )
 from tenro.util import format_file_location
 from tenro.util.env import get_env_bool
@@ -243,14 +245,7 @@ def _wrap_agent_method(
                 return
 
             canonical_key = method_target_path or f"unknown.{agent_name}"
-            span = AgentRun(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=canonical_key,
-                display_name=agent_name,
-                input_data=args,
-            )
+            span = create_agent_span(canonical_key, agent_name, input_data=args)
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -297,14 +292,7 @@ def _wrap_agent_method(
                     guard_exit(token)
 
             canonical_key = method_target_path or f"unknown.{agent_name}"
-            span = AgentRun(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=canonical_key,
-                display_name=agent_name,
-                input_data=args,
-            )
+            span = create_agent_span(canonical_key, agent_name, input_data=args)
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -351,14 +339,7 @@ def _wrap_agent_method(
                     guard_exit(token)
 
             canonical_key = method_target_path or f"unknown.{agent_name}"
-            span = AgentRun(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=canonical_key,
-                display_name=agent_name,
-                input_data=args,
-            )
+            span = create_agent_span(canonical_key, agent_name, input_data=args)
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -393,15 +374,7 @@ def _wrap_agent_method(
                 guard_exit(token)
 
         canonical_key = method_target_path or f"unknown.{agent_name}"
-        span = AgentRun(
-            id=str(uuid7()),
-            trace_id=str(uuid7()),
-            start_time=time.time(),
-            target_path=canonical_key,
-            display_name=agent_name,
-            input_data=args,
-            kwargs=kwargs,
-        )
+        span = create_agent_span(canonical_key, agent_name, input_data=args, kwargs=kwargs)
         lifecycle = construct._lifecycle
         parent_span_id = lifecycle.start_span_manual(span)
 
@@ -470,13 +443,8 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
                     guard_exit(token)
                 return
 
-            span = AgentRun(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=target_path,
-                display_name=agent_name,
-                input_data=_strip_self_if_method(args),
+            span = create_agent_span(
+                target_path, agent_name, input_data=_strip_self_if_method(args)
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -524,13 +492,8 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
                 finally:
                     guard_exit(token)
 
-            span = AgentRun(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=target_path,
-                display_name=agent_name,
-                input_data=_strip_self_if_method(args),
+            span = create_agent_span(
+                target_path, agent_name, input_data=_strip_self_if_method(args)
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -578,13 +541,8 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
                 finally:
                     guard_exit(token)
 
-            span = AgentRun(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=target_path,
-                display_name=agent_name,
-                input_data=_strip_self_if_method(args),
+            span = create_agent_span(
+                target_path, agent_name, input_data=_strip_self_if_method(args)
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -622,14 +580,7 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
             finally:
                 guard_exit(token)
 
-        span = AgentRun(
-            id=str(uuid7()),
-            trace_id=str(uuid7()),
-            start_time=time.time(),
-            target_path=target_path,
-            display_name=agent_name,
-            input_data=_strip_self_if_method(args),
-        )
+        span = create_agent_span(target_path, agent_name, input_data=_strip_self_if_method(args))
         lifecycle = construct._lifecycle
         parent_span_id = lifecycle.start_span_manual(span)
 
@@ -901,13 +852,8 @@ def _make_agent_object_wrapper(
                     guard_exit(token)
                 return
 
-            span = AgentRun(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=method_target_path or f"unknown.{agent_name}",
-                display_name=agent_name,
-                input_data=args,
+            span = create_agent_span(
+                method_target_path or f"unknown.{agent_name}", agent_name, input_data=args
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -953,13 +899,8 @@ def _make_agent_object_wrapper(
                 finally:
                     guard_exit(token)
 
-            span = AgentRun(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=method_target_path or f"unknown.{agent_name}",
-                display_name=agent_name,
-                input_data=args,
+            span = create_agent_span(
+                method_target_path or f"unknown.{agent_name}", agent_name, input_data=args
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -1004,13 +945,8 @@ def _make_agent_object_wrapper(
                 finally:
                     guard_exit(token)
 
-            span = AgentRun(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=method_target_path or f"unknown.{agent_name}",
-                display_name=agent_name,
-                input_data=args,
+            span = create_agent_span(
+                method_target_path or f"unknown.{agent_name}", agent_name, input_data=args
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -1066,15 +1002,7 @@ def _wrap_tool_function(func: F, tool_name: str) -> F:
                     guard_exit(token)
                 return
 
-            span = ToolCall(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=target_path,
-                display_name=tool_name,
-                args=args,
-                kwargs=kwargs,
-            )
+            span = create_tool_span(target_path, tool_name, args=args, kwargs=kwargs)
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -1121,15 +1049,7 @@ def _wrap_tool_function(func: F, tool_name: str) -> F:
                 finally:
                     guard_exit(token)
 
-            span = ToolCall(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=target_path,
-                display_name=tool_name,
-                args=args,
-                kwargs=kwargs,
-            )
+            span = create_tool_span(target_path, tool_name, args=args, kwargs=kwargs)
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -1176,15 +1096,7 @@ def _wrap_tool_function(func: F, tool_name: str) -> F:
                 finally:
                     guard_exit(token)
 
-            span = ToolCall(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=target_path,
-                display_name=tool_name,
-                args=args,
-                kwargs=kwargs,
-            )
+            span = create_tool_span(target_path, tool_name, args=args, kwargs=kwargs)
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -1221,15 +1133,7 @@ def _wrap_tool_function(func: F, tool_name: str) -> F:
             finally:
                 guard_exit(token)
 
-        span = ToolCall(
-            id=str(uuid7()),
-            trace_id=str(uuid7()),
-            start_time=time.time(),
-            target_path=target_path,
-            display_name=tool_name,
-            args=args,
-            kwargs=kwargs,
-        )
+        span = create_tool_span(target_path, tool_name, args=args, kwargs=kwargs)
         lifecycle = construct._lifecycle
         parent_span_id = lifecycle.start_span_manual(span)
 
@@ -1292,15 +1196,7 @@ def _wrap_tool_method(
                 return
 
             canonical_key = method_target_path or f"unknown.{tool_name}"
-            span = ToolCall(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=canonical_key,
-                display_name=tool_name,
-                args=args,
-                kwargs=kwargs,
-            )
+            span = create_tool_span(canonical_key, tool_name, args=args, kwargs=kwargs)
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -1347,15 +1243,7 @@ def _wrap_tool_method(
                     guard_exit(token)
 
             canonical_key = method_target_path or f"unknown.{tool_name}"
-            span = ToolCall(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=canonical_key,
-                display_name=tool_name,
-                args=args,
-                kwargs=kwargs,
-            )
+            span = create_tool_span(canonical_key, tool_name, args=args, kwargs=kwargs)
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -1403,15 +1291,7 @@ def _wrap_tool_method(
                     guard_exit(token)
 
             canonical_key = method_target_path or f"unknown.{tool_name}"
-            span = ToolCall(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=canonical_key,
-                display_name=tool_name,
-                args=args,
-                kwargs=kwargs,
-            )
+            span = create_tool_span(canonical_key, tool_name, args=args, kwargs=kwargs)
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -1447,15 +1327,7 @@ def _wrap_tool_method(
                 guard_exit(token)
 
         canonical_key = method_target_path or f"unknown.{tool_name}"
-        span = ToolCall(
-            id=str(uuid7()),
-            trace_id=str(uuid7()),
-            start_time=time.time(),
-            target_path=canonical_key,
-            display_name=tool_name,
-            args=args,
-            kwargs=kwargs,
-        )
+        span = create_tool_span(canonical_key, tool_name, args=args, kwargs=kwargs)
         lifecycle = construct._lifecycle
         parent_span_id = lifecycle.start_span_manual(span)
 
@@ -1671,14 +1543,8 @@ def _make_tool_object_wrapper(
                     guard_exit(token)
                 return
 
-            span = ToolCall(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=method_target_path or f"unknown.{tool_name}",
-                display_name=tool_name,
-                args=args,
-                kwargs=kwargs,
+            span = create_tool_span(
+                method_target_path or f"unknown.{tool_name}", tool_name, args=args, kwargs=kwargs
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -1724,14 +1590,8 @@ def _make_tool_object_wrapper(
                 finally:
                     guard_exit(token)
 
-            span = ToolCall(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=method_target_path or f"unknown.{tool_name}",
-                display_name=tool_name,
-                args=args,
-                kwargs=kwargs,
+            span = create_tool_span(
+                method_target_path or f"unknown.{tool_name}", tool_name, args=args, kwargs=kwargs
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -1776,14 +1636,8 @@ def _make_tool_object_wrapper(
                 finally:
                     guard_exit(token)
 
-            span = ToolCall(
-                id=str(uuid7()),
-                trace_id=str(uuid7()),
-                start_time=time.time(),
-                target_path=method_target_path or f"unknown.{tool_name}",
-                display_name=tool_name,
-                args=args,
-                kwargs=kwargs,
+            span = create_tool_span(
+                method_target_path or f"unknown.{tool_name}", tool_name, args=args, kwargs=kwargs
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -2010,13 +1864,10 @@ def link_llm(
                     return
 
                 # Create scope for the streaming LLM call
-                scope = LLMScope(
-                    id=str(uuid7()),
-                    trace_id=str(uuid7()),
-                    start_time=time.time(),
+                scope = create_llm_scope_span(
+                    caller_name,
                     provider=resolved_provider,
                     model=model,
-                    caller_name=caller_name,
                     caller_signature=caller_signature,
                     caller_location=caller_location,
                     input_data=args,
@@ -2032,16 +1883,12 @@ def link_llm(
                     if simulated:
                         # Create LLMCall span for tracking/verification
                         effective_model = get_simulation_model(target_path, model)
-                        span = LLMCall(
-                            id=str(uuid7()),
-                            trace_id=str(uuid7()),
-                            start_time=time.time(),
+                        span = create_llm_call_span(
                             provider=resolved_provider or "custom",
-                            messages=[],
-                            response="",  # Will be updated after iteration
                             model=effective_model,
                             target_path=target_path,
-                            llm_scope_id=scope.id,
+                            llm_scope_id=scope.span_id,
+                            response="",
                         )
                         span.simulated = True
                         span_parent_id = lifecycle.start_span_manual(span)
@@ -2082,13 +1929,10 @@ def link_llm(
                     return
 
                 # Create scope for the streaming LLM call
-                scope = LLMScope(
-                    id=str(uuid7()),
-                    trace_id=str(uuid7()),
-                    start_time=time.time(),
+                scope = create_llm_scope_span(
+                    caller_name,
                     provider=resolved_provider,
                     model=model,
-                    caller_name=caller_name,
                     caller_signature=caller_signature,
                     caller_location=caller_location,
                     input_data=args,
@@ -2104,16 +1948,12 @@ def link_llm(
                     if simulated:
                         # Create LLMCall span for tracking/verification
                         effective_model = get_simulation_model(target_path, model)
-                        span = LLMCall(
-                            id=str(uuid7()),
-                            trace_id=str(uuid7()),
-                            start_time=time.time(),
+                        span = create_llm_call_span(
                             provider=resolved_provider or "custom",
-                            messages=[],
-                            response="",  # Will be updated after iteration
                             model=effective_model,
                             target_path=target_path,
-                            llm_scope_id=scope.id,
+                            llm_scope_id=scope.span_id,
+                            response="",
                         )
                         span.simulated = True
                         span_parent_id = lifecycle.start_span_manual(span)
@@ -2153,13 +1993,10 @@ def link_llm(
                     return await func(*args, **kwargs)
 
                 # Create scope and check for dispatch
-                scope = LLMScope(
-                    id=str(uuid7()),
-                    trace_id=str(uuid7()),
-                    start_time=time.time(),
+                scope = create_llm_scope_span(
+                    caller_name,
                     provider=resolved_provider,
                     model=model,
-                    caller_name=caller_name,
                     caller_signature=caller_signature,
                     caller_location=caller_location,
                     input_data=args,
@@ -2171,16 +2008,12 @@ def link_llm(
                     if simulated:
                         # Create LLMCall span for tracking/verification
                         effective_model = get_simulation_model(target_path, model)
-                        span = LLMCall(
-                            id=str(uuid7()),
-                            trace_id=str(uuid7()),
-                            start_time=time.time(),
+                        span = create_llm_call_span(
                             provider=resolved_provider or "custom",
-                            messages=[],  # Dispatch doesn't capture messages
-                            response=result if isinstance(result, str) else str(result),
                             model=effective_model,
                             target_path=target_path,
-                            llm_scope_id=scope.id,  # Link to enclosing scope
+                            llm_scope_id=scope.span_id,
+                            response=result if isinstance(result, str) else str(result),
                         )
                         span.simulated = True
                         with construct._lifecycle.start_span(span):
@@ -2203,13 +2036,10 @@ def link_llm(
                     return func(*args, **kwargs)
 
                 # Create scope and check for dispatch
-                scope = LLMScope(
-                    id=str(uuid7()),
-                    trace_id=str(uuid7()),
-                    start_time=time.time(),
+                scope = create_llm_scope_span(
+                    caller_name,
                     provider=resolved_provider,
                     model=model,
-                    caller_name=caller_name,
                     caller_signature=caller_signature,
                     caller_location=caller_location,
                     input_data=args,
@@ -2221,16 +2051,12 @@ def link_llm(
                     if simulated:
                         # Create LLMCall span for tracking/verification
                         effective_model = get_simulation_model(target_path, model)
-                        span = LLMCall(
-                            id=str(uuid7()),
-                            trace_id=str(uuid7()),
-                            start_time=time.time(),
+                        span = create_llm_call_span(
                             provider=resolved_provider or "custom",
-                            messages=[],  # Dispatch doesn't capture messages
-                            response=result if isinstance(result, str) else str(result),
                             model=effective_model,
                             target_path=target_path,
-                            llm_scope_id=scope.id,  # Link to enclosing scope
+                            llm_scope_id=scope.span_id,
+                            response=result if isinstance(result, str) else str(result),
                         )
                         span.simulated = True
                         with construct._lifecycle.start_span(span):
@@ -2308,8 +2134,8 @@ def link_tool(
         >>>
         >>> @link_tool("calculator")
         ... class Calculator:
-        ...     def invoke(self, expr: str) -> int:
-        ...         return eval(expr)
+        ...     def invoke(self, a: int, b: int) -> int:
+        ...         return a + b
         >>>
         >>> @link_tool("multi_tool", entry_points=["search", "fetch"])
         ... class MultiTool:

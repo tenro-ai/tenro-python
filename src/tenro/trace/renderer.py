@@ -143,10 +143,10 @@ class TraceRenderer:
         tools: dict[str, ToolCall] = {}
         for span in spans:
             if isinstance(span, LLMScope):
-                scopes[span.id] = span
+                scopes[span.span_id] = span
                 span._render_children = []  # type: ignore[attr-defined]
             elif isinstance(span, ToolCall):
-                tools[span.id] = span
+                tools[span.span_id] = span
                 span._render_children = []  # type: ignore[attr-defined]
 
         result: list[BaseSpan] = []
@@ -362,7 +362,7 @@ class TraceRenderer:
         ]
 
         if agents:
-            total_ms = sum(a.latency_ms for a in agents)
+            total_ms = sum(a.latency_ms or 0.0 for a in agents)
             duration = f"{total_ms / 1000:.2f}s" if total_ms >= 1000 else f"{total_ms:.0f}ms"
             summary_parts.append(f"Total: {duration}")
 

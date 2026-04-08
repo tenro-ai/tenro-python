@@ -3,8 +3,8 @@
 
 """Span models for tracking LLM calls, tool calls, and agent runs.
 
-These objects track lifecycle during test execution, starting in
-"running" state and updating in-place as operations complete.
+Mutable objects that track operation lifecycle during test execution,
+updating in-place as operations complete.
 
 Span types:
 - LLMCall: Tracks an LLM API call
@@ -15,41 +15,218 @@ Span types:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import os
+import re
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field
+from pydantic import BaseModel as PydanticBaseModel
+from pydantic import (
+    ConfigDict,
+    Discriminator,
+    Field,
+    Tag,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from tenro._core.model_base import BaseModel
+
+SpanType = Literal["llm", "tool", "agent", "llm_scope"]
+SpanKind = Literal["CLIENT", "SERVER", "INTERNAL", "PRODUCER", "CONSUMER"]
+StatusCode = Literal["unset", "error", "ok"]
+
+_MAX_TRACE_STATE_LEN = 512
+
+_RE_TRACE_ID = re.compile(r"^[0-9a-f]{32}$")
+_RE_SPAN_ID = re.compile(r"^[0-9a-f]{16}$")
+_RE_TRACE_FLAGS = re.compile(r"^[0-9a-f]{2}$")
+_ZERO_TRACE_ID = "0" * 32
+_ZERO_SPAN_ID = "0" * 16
+
+
+def _validate_trace_id(v: str) -> str:
+    """Validate OTel trace ID: 32 lowercase hex, non-zero."""
+    if not _RE_TRACE_ID.match(v) or v == _ZERO_TRACE_ID:
+        msg = f"trace_id must be 32 lowercase hex non-zero, got {v!r}"
+        raise ValueError(msg)
+    return v
+
+
+def _validate_span_id(v: str) -> str:
+    """Validate OTel span ID: 16 lowercase hex, non-zero."""
+    if not _RE_SPAN_ID.match(v) or v == _ZERO_SPAN_ID:
+        msg = f"span_id must be 16 lowercase hex non-zero, got {v!r}"
+        raise ValueError(msg)
+    return v
+
+
+def _validate_trace_flags(v: str) -> str:
+    """Validate W3C trace flags: 2 lowercase hex chars."""
+    if not _RE_TRACE_FLAGS.match(v):
+        msg = f"trace_flags must be 2 lowercase hex chars, got {v!r}"
+        raise ValueError(msg)
+    return v
+
+
+def _validate_trace_state(v: str | None) -> str | None:
+    """Validate W3C tracestate: max 512 bytes. Whitespace-only normalizes to None."""
+    if v is None:
+        return v
+    if len(v.encode("utf-8")) > _MAX_TRACE_STATE_LEN:
+        msg = f"trace_state exceeds {_MAX_TRACE_STATE_LEN} byte limit"
+        raise ValueError(msg)
+    if not v.strip():
+        return None
+    return v
+
+
+def _validate_optional_span_id(v: str | None) -> str | None:
+    """Validate optional span ID reference (16 lowercase hex, non-zero)."""
+    if v is not None:
+        _validate_span_id(v)
+    return v
+
+
+def _generate_trace_id() -> str:
+    """Generate OTel-native trace ID (32 hex chars)."""
+    return os.urandom(16).hex()
+
+
+def _generate_span_id() -> str:
+    """Generate OTel-native span ID (16 hex chars)."""
+    return os.urandom(8).hex()
+
+
+class SpanContext(PydanticBaseModel):
+    """Immutable W3C trace context for a span.
+
+    Carries the identifiers needed for trace propagation and span linking.
+
+    Attributes:
+        trace_id: 32 lowercase hex chars (16 bytes), non-zero.
+        span_id: 16 lowercase hex chars (8 bytes), non-zero.
+        trace_flags: 2 lowercase hex chars (1 byte). Stored as hex wire
+            format, not OTel's internal ``TraceFlags(int)`` representation.
+        trace_state: Raw W3C tracestate header string, or None. Stored as
+            the unparsed header value, not a structured key-value type.
+        is_remote: True when this context was extracted from propagation.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    trace_id: str
+    span_id: str
+    trace_flags: str = "00"
+    trace_state: str | None = None
+    is_remote: bool = False
+
+    _validate_trace_id = field_validator("trace_id")(_validate_trace_id)
+    _validate_span_id = field_validator("span_id")(_validate_span_id)
+    _validate_trace_flags = field_validator("trace_flags")(_validate_trace_flags)
+    _validate_trace_state = field_validator("trace_state")(_validate_trace_state)
+
+
+class SpanLink(PydanticBaseModel):
+    """Link to another span's context.
+
+    Used for retries, fan-out, and async handoffs per OTel spec.
+
+    Note: ``attributes`` is only shallow-frozen — Pydantic's ``frozen=True``
+    prevents reassigning the field, but the dict itself remains mutable.
+    This is a known Pydantic limitation, acceptable for the testing SDK.
+
+    Attributes:
+        context: Full span context of the linked span.
+        attributes: Additional link attributes (shallow-frozen).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    context: SpanContext
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 class BaseSpan(BaseModel):
     """Base class for all span types (LLMCall, ToolCall, AgentRun).
 
-    Defines shared fields for timed operations in a trace. Spans share the
-    same lifecycle: running -> completed/error.
+    Defines shared fields for timed operations in a trace.
 
     Attributes:
-        id: Unique span identifier.
-        trace_id: Trace identifier for the overall workflow.
-        start_time: Unix timestamp when the span started.
+        span_id: Unique span identifier (16 hex chars).
+        trace_id: Trace identifier (32 hex chars).
+        start_time: Unix nanoseconds (from ``time.time_ns()``) when the span started.
         parent_span_id: Immediate parent span ID (Agent, LLM, or Tool).
         agent_id: Closest agent ancestor span ID, if any.
-        status: Lifecycle status (`running`, `completed`, or `error`).
-        latency_ms: Span duration in milliseconds.
         error: Error message if the span failed.
-        metadata: Additional metadata for the span.
+        span_type: Discriminator for span subclass.
+        kind: OTel SpanKind.
+        name: OTel span name.
+        end_time: Unix nanoseconds when the span ended, or None if in-flight.
+        status_code: OTel status code.
+        status_message: OTel status message.
+        attributes: OTel-style attributes dict.
+        trace_flags: W3C trace flags as hex wire format (2 chars). Stored
+            as string, not OTel's internal ``TraceFlags(int)``.
+        trace_state: Raw W3C tracestate header string, unparsed.
+        parent_is_remote: Derived convenience flag set by LifecycleManager
+            when the parent was extracted from trace propagation. The
+            canonical source is ``SpanContext.is_remote`` on the parent.
+        links: Span links to related spans.
+        creation_seq: Monotonic counter for deterministic ordering when
+            start_time values tie. Assigned by LifecycleManager.
     """
 
-    id: str
+    span_id: str
     trace_id: str
-    start_time: float
+    start_time: int
 
     parent_span_id: str | None = None
     agent_id: str | None = None
-    status: Literal["running", "completed", "error"] = "running"
-    latency_ms: float = 0.0
     error: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    span_type: SpanType
+    kind: SpanKind
+    name: str
+    end_time: int | None = None
+    status_code: StatusCode = "unset"
+    status_message: str | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+    trace_flags: str = "00"
+    trace_state: str | None = None
+    parent_is_remote: bool = False
+    links: list[SpanLink] = Field(default_factory=list)
+    creation_seq: int = Field(default=0, ge=0)
+
+    _validate_trace_id = field_validator("trace_id")(_validate_trace_id)
+    _validate_span_id = field_validator("span_id")(_validate_span_id)
+    _validate_trace_flags = field_validator("trace_flags")(_validate_trace_flags)
+    _validate_trace_state = field_validator("trace_state")(_validate_trace_state)
+    _validate_parent_span_id = field_validator("parent_span_id")(_validate_optional_span_id)
+    _validate_agent_id = field_validator("agent_id")(_validate_optional_span_id)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def latency_ms(self) -> float | None:
+        """Span duration in milliseconds, or None if span is still in-flight."""
+        if self.end_time is None:
+            return None
+        return (self.end_time - self.start_time) / 1_000_000
+
+    @model_validator(mode="after")
+    def _check_end_time(self) -> Self:
+        if self.end_time is not None and self.end_time < self.start_time:
+            msg = f"end_time ({self.end_time}) < start_time ({self.start_time})"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _check_remote_parent(self) -> Self:
+        if self.parent_is_remote and self.parent_span_id is None:
+            msg = "parent_is_remote=True requires parent_span_id"
+            raise ValueError(msg)
+        return self
 
 
 class LLMCall(BaseSpan):
@@ -87,6 +264,12 @@ class LLMCall(BaseSpan):
     llm_scope_id: str | None = None
     target_path: str | None = None
     simulated: bool = False
+
+    response_model: str | None = None
+    response_id: str | None = None
+    finish_reasons: list[str] | None = None
+
+    _validate_llm_scope_id = field_validator("llm_scope_id")(_validate_optional_span_id)
 
 
 class LLMScope(BaseSpan):
@@ -148,6 +331,10 @@ class ToolCall(BaseSpan):
     simulated: bool = False
     invoked_by_llm_call_id: str | None = None
 
+    tool_call_id: str | None = None
+
+    _validate_invoked_by = field_validator("invoked_by_llm_call_id")(_validate_optional_span_id)
+
 
 class AgentRun(BaseSpan):
     """Mutable object representing an agent execution lifecycle.
@@ -156,8 +343,8 @@ class AgentRun(BaseSpan):
     Represents the top-level span for agent operations, with child
     spans for LLM calls and tool calls.
 
-    The `id` field is a unique span identifier for this specific run.
-    The `agent_id` field equals `id` (an agent belongs to itself).
+    The `span_id` field is a unique span identifier for this specific run.
+    The `agent_id` field equals `span_id` (an agent belongs to itself).
 
     Used for:
     - Multi-agent hierarchies (Manager -> Researcher -> Writer)
@@ -181,11 +368,21 @@ class AgentRun(BaseSpan):
     display_name: str | None = None
     parent_agent_id: str | None = None
     invoked_by_tool_call_id: str | None = None
-    spans: list[BaseSpan] = Field(default_factory=list)
+    spans: list[SpanUnion] = Field(default_factory=list)
     input_data: Any = None
     output_data: Any = None
     kwargs: dict[str, Any] = Field(default_factory=dict)
     simulated: bool = False
+
+    _validate_parent_agent = field_validator("parent_agent_id")(_validate_optional_span_id)
+    _validate_invoked_by = field_validator("invoked_by_tool_call_id")(_validate_optional_span_id)
+
+    @model_validator(mode="after")
+    def _default_agent_id(self) -> Self:
+        """An agent belongs to itself: agent_id defaults to span_id."""
+        if self.agent_id is None:
+            self.agent_id = self.span_id
+        return self
 
     def get_llm_calls(self, recursive: bool = True) -> list[LLMCall]:
         """Get all LLM calls in this agent's execution.
@@ -239,3 +436,22 @@ class AgentRun(BaseSpan):
                 child_agents.extend(child.get_child_agents(recursive=True))
 
         return child_agents
+
+
+def _span_discriminator(v: Any) -> str:
+    """Discriminator function for SpanUnion."""
+    if isinstance(v, dict):
+        return str(v.get("span_type"))
+    return str(v.span_type)
+
+
+SpanUnion = Annotated[
+    Annotated[LLMCall, Tag("llm")]
+    | Annotated[ToolCall, Tag("tool")]
+    | Annotated[AgentRun, Tag("agent")]
+    | Annotated[LLMScope, Tag("llm_scope")],
+    Discriminator(_span_discriminator),
+]
+
+# Resolve forward reference: AgentRun.spans uses SpanUnion
+AgentRun.model_rebuild()

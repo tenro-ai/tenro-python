@@ -5,9 +5,9 @@
 
 Provides:
 - Span types (LLMCall, ToolCall, AgentRun) for operation tracking
-- SpanEvent for immutable event records
+- Type aliases (SpanType, SpanKind, StatusCode) for OTel alignment
 - Context functions for async-safe span stack tracking
-- LifecycleManager for span lifecycle with event emission
+- LifecycleManager for span lifecycle management
 """
 
 from __future__ import annotations
@@ -20,10 +20,19 @@ from tenro._core.context import (
     pop_span,
     push_span,
 )
-from tenro._core.events import SpanEvent
 from tenro._core.lifecycle_manager import LifecycleManager
 from tenro._core.response_types import ProviderResponse
-from tenro._core.spans import AgentRun, BaseSpan, LLMCall, ToolCall
+from tenro._core.spans import (
+    AgentRun,
+    BaseSpan,
+    LLMCall,
+    SpanContext,
+    SpanKind,
+    SpanLink,
+    SpanType,
+    StatusCode,
+    ToolCall,
+)
 from tenro._core.trace_types import SpanAttributes, TraceContext
 from tenro.evals.types import EvalResult, EvalScore
 
@@ -39,8 +48,12 @@ __all__ = [
     "LifecycleManager",
     "ProviderResponse",
     "SpanAttributes",
-    # Events
-    "SpanEvent",
+    # OTel types
+    "SpanContext",
+    "SpanKind",
+    "SpanLink",
+    "SpanType",
+    "StatusCode",
     "ToolCall",
     "TraceContext",
     "clear_context",

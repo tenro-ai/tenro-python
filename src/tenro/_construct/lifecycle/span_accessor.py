@@ -1,55 +1,49 @@
 # Copyright 2026 Tenro.ai
 # SPDX-License-Identifier: Apache-2.0
 
-"""Span accessor for retrieving typed spans from event store."""
+"""Span accessor for retrieving typed spans from span store."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
-from tenro._core.reconstruction import (
-    _create_typed_spans,
-    _group_events_by_span,
-    reconstruct_spans,
-)
 from tenro._core.spans import AgentRun, LLMCall, LLMScope, ToolCall
 
 if TYPE_CHECKING:
-    from tenro._construct.in_memory_store import EventStore
-
-T = TypeVar("T", LLMCall, ToolCall)
+    from tenro._construct.span_store import SpanStore
 
 
 class SpanAccessor:
-    """Provides access to spans from event store.
+    """Provides typed access to spans from span store."""
 
-    Reconstructs spans from events and provides flat lists of agent runs,
-    LLM calls, and tool calls.
-    """
-
-    def __init__(self, event_store: EventStore) -> None:
-        """Initialize with event store.
+    def __init__(self, span_store: SpanStore) -> None:
+        """Initialize with span store.
 
         Args:
-            event_store: Event store containing span events.
+            span_store: Store containing completed spans.
         """
-        self._event_store = event_store
+        self._span_store = span_store
 
     def get_root_agent_runs(self) -> list[AgentRun]:
-        """Get root agent runs with populated spans.
+        """Get root agent runs with populated child spans.
+
+        Root agents are those with no parent_agent_id. Their .spans
+        list is already populated by LifecycleManager during execution.
 
         Returns:
-            List of root agent runs with nested spans.
+            List of root agent runs sorted by start time.
         """
-        events = self._event_store.get_all_events()
-        return reconstruct_spans(events)
+        spans = self._span_store.get_all_spans()
+        return sorted(
+            (s for s in spans if isinstance(s, AgentRun) and s.parent_agent_id is None),
+            key=lambda s: (s.start_time, s.creation_seq),
+        )
 
     def get_all_agent_runs(self) -> list[AgentRun]:
         """Get all agent runs as flat list.
 
         Returns:
-            Flat list including nested agents.
+            Flat list including nested agents, sorted by start time.
         """
         root_agents = self.get_root_agent_runs()
         flat_agents: list[AgentRun] = []
@@ -69,67 +63,37 @@ class SpanAccessor:
         """Get all LLM calls including orphans.
 
         Returns:
-            Flat list of LLM calls from agents and orphan calls.
+            Flat list of all LLM calls sorted by start time.
         """
-        return self._get_spans_with_orphans(
-            span_type=LLMCall,
-            get_from_agent=lambda a: a.get_llm_calls(recursive=True),
+        spans = self._span_store.get_all_spans()
+        return sorted(
+            (s for s in spans if isinstance(s, LLMCall)),
+            key=lambda s: (s.start_time, s.creation_seq),
         )
 
     def get_tool_calls(self) -> list[ToolCall]:
         """Get all tool calls including orphans.
 
         Returns:
-            Flat list of tool calls from agents and orphan calls.
+            Flat list of all tool calls sorted by start time.
         """
-        return self._get_spans_with_orphans(
-            span_type=ToolCall,
-            get_from_agent=lambda a: a.get_tool_calls(recursive=True),
+        spans = self._span_store.get_all_spans()
+        return sorted(
+            (s for s in spans if isinstance(s, ToolCall)),
+            key=lambda s: (s.start_time, s.creation_seq),
         )
 
     def get_llm_scopes(self) -> list[LLMScope]:
         """Get all LLMScope spans (from @link_llm decorator).
 
-        LLMScope tracks when @link_llm-decorated functions execute, used to
-        detect missing HTTP calls.
-
         Returns:
-            List of LLMScope spans.
+            List of LLMScope spans sorted by start time.
         """
-        events = self._event_store.get_all_events()
-        span_map = _group_events_by_span(events)
-        typed_spans = _create_typed_spans(span_map)
-        return [span for span in typed_spans.values() if isinstance(span, LLMScope)]
-
-    def _get_spans_with_orphans(
-        self,
-        span_type: type[T],
-        get_from_agent: Callable[[AgentRun], list[T]],
-    ) -> list[T]:
-        """Get spans from agents plus orphan spans.
-
-        Args:
-            span_type: Type of span to retrieve.
-            get_from_agent: Function to get spans from an agent.
-
-        Returns:
-            Combined list of agent spans and orphan spans.
-        """
-        root_agents = self.get_root_agent_runs()
-        agent_spans = [span for agent in root_agents for span in get_from_agent(agent)]
-        agent_span_ids = {span.id for span in agent_spans}
-
-        events = self._event_store.get_all_events()
-        span_map = _group_events_by_span(events)
-        typed_spans = _create_typed_spans(span_map)
-
-        orphans = [
-            span
-            for span in typed_spans.values()
-            if isinstance(span, span_type) and span.id not in agent_span_ids
-        ]
-
-        return agent_spans + orphans
+        spans = self._span_store.get_all_spans()
+        return sorted(
+            (s for s in spans if isinstance(s, LLMScope)),
+            key=lambda s: (s.start_time, s.creation_seq),
+        )
 
 
 __all__ = ["SpanAccessor"]

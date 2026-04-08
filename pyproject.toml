@@ -1,6 +1,6 @@
 [project]
 name = "tenro"
-version = "0.2.1"
+version = "0.2.2"
 description = "A modern multi-agent AI testing framework"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -46,6 +46,12 @@ dependencies = [
     "httpx>=0.28.1",
     "rich>=14.2.0",
     "uuid-utils>=0.12.0",
+]
+
+[project.optional-dependencies]
+otel = [
+    "opentelemetry-sdk>=1.31.0",
+    "opentelemetry-exporter-otlp>=1.31.0",
 ]
 
 [project.entry-points.pytest11]
@@ -115,34 +121,32 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = [
-    "E",   # pycodestyle errors
-    "F",   # pyflakes
-    "I",   # isort
-    "N",   # pep8-naming
-    "W",   # pycodestyle warnings
-    "UP",  # pyupgrade
-    "B",   # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "SIM", # flake8-simplify
-    "D",   # pydocstyle
-    "FIX", # flake8-fixme (TODO/FIXME comments)
-    "RUF", # Ruff-specific rules
-]
-ignore = [
-    "D100", # Missing docstring in public module
-    "D104", # Missing docstring in public package
-    "D105", # Missing docstring in magic method
-    "D107", # Missing docstring in __init__
-    "D417", # Missing argument descriptions in docstring
-]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "C90", "SIM", "D", "FIX", "PLR", "RUF"]
+ignore = ["D100", "D104", "D105", "D107", "D417", "PLR2004", "PLR0913"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.pylint]
+max-branches = 15
+max-statements = 60
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D"]
+"tests/**" = ["D", "PLR"]
 "examples/**" = ["D"]
+"src/tenro/__init__.py" = ["PLR"]
+"src/tenro/_construct/*.py" = ["C901", "PLR"]
+"src/tenro/_construct/**/*.py" = ["C901", "PLR"]
+"src/tenro/_core/*.py" = ["PLR"]
+"src/tenro/linking/*.py" = ["C901", "PLR"]
+"src/tenro/simulate/*.py" = ["C901", "PLR"]
+"src/tenro/tool_calls.py" = ["C901", "PLR"]
+"src/tenro/trace/*.py" = ["C901", "PLR"]
+"src/tenro/construct/http/_client.py" = ["C901", "PLR"]
+"src/tenro/construct/http/registry/providers.py" = ["C901", "PLR"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["tenro"]

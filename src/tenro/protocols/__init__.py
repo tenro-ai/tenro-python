@@ -8,6 +8,4 @@ Defines Protocols that describe required behavior for Tenro components.
 
 from __future__ import annotations
 
-from tenro.protocols.event_store import EventStore
-
-__all__ = ["EventStore"]
+__all__: list[str] = []

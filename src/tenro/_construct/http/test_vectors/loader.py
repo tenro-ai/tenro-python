@@ -114,9 +114,13 @@ class TemplateLoader:
 
         Raises:
             FileNotFoundError: If fixture doesn't exist.
+            ValueError: If path escapes fixture directory (defense-in-depth).
         """
-        package_root = Path(__file__).parent
-        fixture_path = package_root / provider / route / f"{feature}_response.json"
+        package_root = Path(__file__).parent.resolve()
+        fixture_path = (package_root / provider / route / f"{feature}_response.json").resolve()
+
+        if not fixture_path.is_relative_to(package_root):
+            raise ValueError("Invalid fixture path: escapes package root")
 
         if not fixture_path.exists():
             available_fixtures = cls._list_available_fixtures()

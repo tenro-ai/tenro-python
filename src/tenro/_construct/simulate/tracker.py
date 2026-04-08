@@ -190,7 +190,7 @@ class SimulationTracker:
             provider_scopes = [
                 s for s in llm_scopes if s.provider == provider or s.provider is None
             ]
-            missing_scopes = [s for s in provider_scopes if s.id not in covered_scope_ids]
+            missing_scopes = [s for s in provider_scopes if s.span_id not in covered_scope_ids]
 
             if missing_scopes:
                 msg = self._build_missing_call_message(

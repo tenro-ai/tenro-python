@@ -163,7 +163,7 @@ def format_span_tree(
 
         emoji = get_span_emoji(span)
         name = get_span_name(span)
-        failed_marker = f"  {ARROW_OUT} FAILED" if span.id == failed_span_id else ""
+        failed_marker = f"  {ARROW_OUT} FAILED" if span.span_id == failed_span_id else ""
         lines.append(f"{indent}{connector} {emoji} {name}{failed_marker}")
 
         span_input = get_span_input(span)
@@ -178,7 +178,7 @@ def format_span_tree(
 
         if isinstance(span, AgentRun) and span.spans:
             lines.append(f"{child_indent}{VERTICAL}")
-            child_tree = format_span_tree(span.spans, failed_span_id, child_indent)
+            child_tree = format_span_tree(span.spans, failed_span_id, child_indent)  # type: ignore[arg-type]
             lines.append(child_tree)
 
     return "\n".join(lines)
@@ -212,7 +212,7 @@ def format_error_with_trace(
     if isinstance(span, AgentRun) and span.spans:
         lines.append("")
         lines.append("Trace:")
-        tree = format_span_tree([span], failed_span_id=span.id, indent="  ")
+        tree = format_span_tree([span], failed_span_id=span.span_id, indent="  ")
         lines.append(tree)
 
     return "\n".join(lines)

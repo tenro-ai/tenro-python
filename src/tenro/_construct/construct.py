@@ -14,10 +14,10 @@ from contextlib import AbstractContextManager
 from typing import Any
 
 from tenro._construct.http import HttpInterceptor
-from tenro._construct.in_memory_store import EventStore
 from tenro._construct.lifecycle import SpanAccessor, SpanLinker
 from tenro._construct.simulate.orchestrator import SimulationOrchestrator
 from tenro._construct.simulate.types import ResponsesInput
+from tenro._construct.span_store import SpanCollector, SpanStore
 from tenro._construct.verify import ConstructVerifications
 from tenro._core.lifecycle_manager import LifecycleManager
 from tenro._core.spans import AgentRun, LLMCall, ToolCall
@@ -48,7 +48,7 @@ class Construct:
         allow_real_llm_calls: bool = False,
         strict_expectations: bool = False,
     ) -> None:
-        """Initialize construct for event-based tracking and simulation.
+        """Initialize construct for tracking and simulation.
 
         The construct wraps test code via context manager to track LLM and
         tool calls. Test code runs inside the `with construct:` block.
@@ -81,12 +81,13 @@ class Construct:
             ```
         """
         self._strict_expectations = strict_expectations
-        self._event_store = EventStore()
+        self._span_store = SpanStore()
         self._trace_id: str | None = None
 
         effective_domains = [] if allow_real_llm_calls else blocked_llm_domains
 
-        self._lifecycle = LifecycleManager(event_store=self._event_store)
+        self._handler = SpanCollector(self._span_store)
+        self._lifecycle = LifecycleManager(handler=self._handler)
         self._http_interceptor = HttpInterceptor(
             on_call=self._handle_http_call,
             blocked_llm_domains=effective_domains,
@@ -97,7 +98,7 @@ class Construct:
             http_interceptor=self._http_interceptor,
         )
         self._linker = SpanLinker(lifecycle=self._lifecycle)
-        self._span_accessor = SpanAccessor(event_store=self._event_store)
+        self._span_accessor = SpanAccessor(span_store=self._span_store)
 
         self._verifications: ConstructVerifications | None = None
 
@@ -106,7 +107,7 @@ class Construct:
 
     @property
     def agent_runs(self) -> list[AgentRun]:
-        """Get all agent runs as a flat list (reconstructed from events).
+        """Get all agent runs as a flat list.
 
         Returns:
             Flat list of all agent runs (includes nested agents).
@@ -670,7 +671,7 @@ class Construct:
             self._orchestrator.deactivate()
 
     def _get_verifications(self) -> ConstructVerifications:
-        """Get verifications instance with reconstructed spans."""
+        """Get verifications instance."""
         return ConstructVerifications(
             agent_runs=self._get_root_agent_runs(),
             llm_calls=self.llm_calls,
