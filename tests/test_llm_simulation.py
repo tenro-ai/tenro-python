@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+import tenro
 from tenro import Provider
 from tenro.simulate import llm
-from tenro.testing import tenro
 
 if TYPE_CHECKING:
     import anthropic
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 class TestLLMSimulation:
     """LLM simulation and verification."""
 
-    @tenro
+    @tenro.simulate
     def test_single_response(
         self,
         provider: Provider,
@@ -64,7 +64,7 @@ class TestLLMSimulation:
         call = llm.verify(provider)
         assert call.simulated is True
 
-    @tenro
+    @tenro.simulate
     def test_sequential_responses(
         self,
         provider: Provider,
@@ -102,7 +102,7 @@ class TestLLMSimulation:
 class TestLinkedLLM:
     """Tests for @link_llm decorated functions."""
 
-    @tenro
+    @tenro.simulate
     def test_linked_llm_function(self) -> None:
         """Simulate LLM response via @link_llm decorated function."""
         from myapp.llm_functions import chat_completion
@@ -124,7 +124,11 @@ class TestCustomProvider:
         """Register and simulate a custom provider (Mistral)."""
         from examples.myapp.clients import get_openai_client
 
-        from tenro._construct.http.registry import ProviderConfig, ProviderRegistry
+        from tenro._construct.http.registry import (
+            ProviderConfig,
+            ProviderRegistry,
+            register_builtin_providers,
+        )
 
         # Register Mistral as custom provider (uses OpenAI-compatible format)
         ProviderRegistry.register_provider(
@@ -135,20 +139,26 @@ class TestCustomProvider:
                 detection_patterns=("mistral",),
             )
         )
+        try:
+            # Register with construct for simulation routing
+            construct.register_provider("mistral", adapter=Provider.OPENAI)
 
-        # Register with construct for simulation routing
-        construct.register_provider("mistral", adapter=Provider.OPENAI)
+            # Simulate response
+            llm.simulate("mistral", response="Hello from Mistral!")
 
-        # Simulate response
-        llm.simulate("mistral", response="Hello from Mistral!")
+            # Use OpenAI client with Mistral base URL
+            client = get_openai_client(base_url="https://api.mistral.ai/v1")
+            resp = client.chat.completions.create(
+                model="mistral-small",
+                messages=[{"role": "user", "content": "Hi"}],
+            )
 
-        # Use OpenAI client with Mistral base URL
-        client = get_openai_client(base_url="https://api.mistral.ai/v1")
-        resp = client.chat.completions.create(
-            model="mistral-small",
-            messages=[{"role": "user", "content": "Hi"}],
-        )
-
-        assert resp.choices[0].message.content == "Hello from Mistral!"
-        call = llm.verify("mistral")
-        assert call.simulated is True
+            assert resp.choices[0].message.content == "Hello from Mistral!"
+            call = llm.verify("mistral")
+            assert call.simulated is True
+        finally:
+            # ProviderRegistry holds class-level state; reset and re-register
+            # built-ins so this test does not pollute later suites that also
+            # register "mistral".
+            ProviderRegistry.reset()
+            register_builtin_providers()

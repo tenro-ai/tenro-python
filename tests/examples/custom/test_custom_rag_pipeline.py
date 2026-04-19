@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from examples.myapp import RAGPipeline, fetch_documents, generate_response
 
+import tenro
 from tenro import Provider
 from tenro.simulate import llm, tool
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_rag_pipeline_synthesizes_answer() -> None:
     """Test RAG pipeline fetches documents and generates answer."""
     tool.simulate(

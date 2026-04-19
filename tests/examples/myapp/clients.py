@@ -50,15 +50,52 @@ def get_anthropic_client(
     return anthropic.Anthropic(api_key=api_key)
 
 
-def get_gemini_client(api_key: str = "test-key") -> GeminiClient:
+def get_gemini_client(
+    api_key: str = "test-key",
+    force_httpx_async: bool = False,
+) -> GeminiClient:
     """Get a Gemini client instance.
+
+    Args:
+        api_key: API key for authentication.
+        force_httpx_async: When ``True``, forces the async client to use
+            ``httpx.AsyncClient`` instead of the default ``aiohttp`` path
+            (needed for tests where ``respx`` interception is required).
+
+    Returns:
+        Configured Gemini client.
+    """
+    import httpx
+    from google import genai
+    from google.genai.types import HttpOptions
+
+    if force_httpx_async:
+        return genai.Client(
+            api_key=api_key,
+            http_options=HttpOptions(httpx_async_client=httpx.AsyncClient()),
+        )
+    return genai.Client(api_key=api_key)
+
+
+def get_async_openai_client(api_key: str = "test-key") -> openai.AsyncOpenAI:
+    """Get an async OpenAI client instance.
 
     Args:
         api_key: API key for authentication.
 
     Returns:
-        Configured Gemini client.
+        Configured async OpenAI client.
     """
-    from google import genai
+    return openai.AsyncOpenAI(api_key=api_key)
 
-    return genai.Client(api_key=api_key)
+
+def get_async_anthropic_client(api_key: str = "test-key") -> anthropic.AsyncAnthropic:
+    """Get an async Anthropic client instance.
+
+    Args:
+        api_key: API key for authentication.
+
+    Returns:
+        Configured async Anthropic client.
+    """
+    return anthropic.AsyncAnthropic(api_key=api_key)

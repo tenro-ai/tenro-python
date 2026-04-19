@@ -57,7 +57,7 @@ class LifecycleManager:
 
         This context manager provides stack-safe lifecycle management:
         - Enforces depth limits to prevent infinite loops
-        - Auto-links agent_id from current agent context
+        - Auto-links agent_span_id from current agent context
         - Supports remote parent from trace propagation
         - Notifies handler of span start
         - Pushes to context stack
@@ -187,7 +187,7 @@ class LifecycleManager:
 
         Sets both:
         - parent_span_id: Structural parent (skips LLMScope which is transparent)
-        - agent_id: Closest agent ancestor (for agent-centric queries)
+        - agent_span_id: Closest agent ancestor (for agent-centric queries)
 
         LLMScope is transparent for parent attribution. When the current span
         is LLMScope, the structural parent is used instead (Agent, Tool, LLM).
@@ -220,12 +220,12 @@ class LifecycleManager:
             span.trace_state = remote_parent.trace_state
             span.parent_is_remote = True
             if isinstance(span, AgentRun):
-                span.agent_id = span.span_id
+                span.agent_span_id = span.span_id
             return remote_parent.span_id
 
         # Path 3: Root span (no parent)
         if isinstance(span, AgentRun):
-            span.agent_id = span.span_id
+            span.agent_span_id = span.span_id
         return None
 
     def _find_structural_parent(self, stack: list[BaseSpan]) -> BaseSpan | None:
@@ -280,13 +280,13 @@ class LifecycleManager:
             )
 
     def _link_to_parent(self, span: BaseSpan, agent: AgentRun | None) -> None:
-        """Set agent_id and parent_agent_id from nearest agent ancestor."""
+        """Set agent_span_id and parent_agent_id from nearest agent ancestor."""
         if isinstance(span, AgentRun):
-            span.agent_id = span.span_id
+            span.agent_span_id = span.span_id
             if agent:
                 span.parent_agent_id = agent.span_id
         elif agent:
-            span.agent_id = agent.span_id
+            span.agent_span_id = agent.span_id
 
     def _handle_error(self, span: BaseSpan, parent_span_id: str | None, error: Exception) -> None:
         """Handle error: mutate span state and notify handler."""

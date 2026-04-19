@@ -23,14 +23,19 @@ def create_agent_span(
     display_name: str,
     input_data: Any = None,
     kwargs: dict[str, Any] | None = None,
+    *,
+    agent_id: str | None = None,
+    version: str | None = None,
 ) -> AgentRun:
-    """Create an AgentRun span with OTel fields.
+    """Create an AgentRun span.
 
     Args:
         target_path: Fully qualified path (e.g., "mymod.Agent.run").
         display_name: Human-readable agent name.
         input_data: Input data for the agent.
         kwargs: Keyword arguments passed to the agent.
+        agent_id: Stable agent identifier that survives renames.
+        version: Agent version string for regression tracking.
 
     Returns:
         Initialized AgentRun span.
@@ -44,6 +49,8 @@ def create_agent_span(
         name=f"invoke_agent {display_name}",
         target_path=target_path,
         display_name=display_name,
+        agent_id=agent_id,
+        version=version,
         input_data=input_data,
         kwargs=kwargs or {},
     )
@@ -55,7 +62,7 @@ def create_tool_span(
     args: tuple[Any, ...] = (),
     kwargs: dict[str, Any] | None = None,
 ) -> ToolCall:
-    """Create a ToolCall span with OTel fields.
+    """Create a ToolCall span.
 
     Args:
         target_path: Fully qualified path (e.g., "mymod.search").
@@ -89,7 +96,7 @@ def create_llm_scope_span(
     input_data: tuple[Any, ...] = (),
     input_kwargs: dict[str, Any] | None = None,
 ) -> LLMScope:
-    """Create an LLMScope span with OTel fields.
+    """Create an LLMScope span.
 
     Args:
         caller_name: Function name where decorator was applied.
@@ -129,7 +136,7 @@ def create_llm_call_span(
     messages: list[dict[str, Any]] | None = None,
     response: str | None = None,
 ) -> LLMCall:
-    """Create an LLMCall span with OTel fields.
+    """Create an LLMCall span.
 
     Args:
         provider: LLM provider name (e.g., "openai").

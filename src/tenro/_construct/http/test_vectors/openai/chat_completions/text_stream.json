@@ -1,0 +1,48 @@
+{
+  "content_type": "text/event-stream; charset=utf-8",
+  "events": [
+    {
+      "data": {
+        "id": "{{id}}",
+        "object": "chat.completion.chunk",
+        "created": "{{created}}",
+        "model": "{{model}}",
+        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": null}]
+      }
+    },
+    {
+      "skip_if_empty": ["content"],
+      "data": {
+        "id": "{{id}}",
+        "object": "chat.completion.chunk",
+        "created": "{{created}}",
+        "model": "{{model}}",
+        "choices": [{"index": 0, "delta": {"content": "{{content}}"}, "finish_reason": null}]
+      }
+    },
+    {
+      "data": {
+        "id": "{{id}}",
+        "object": "chat.completion.chunk",
+        "created": "{{created}}",
+        "model": "{{model}}",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+      }
+    },
+    {
+      "data": {
+        "id": "{{id}}",
+        "object": "chat.completion.chunk",
+        "created": "{{created}}",
+        "model": "{{model}}",
+        "choices": [],
+        "usage": {
+          "prompt_tokens": "{{usage_input_tokens}}",
+          "completion_tokens": "{{usage_output_tokens}}",
+          "total_tokens": "{{usage_total_tokens}}"
+        }
+      }
+    },
+    {"data": "[DONE]"}
+  ]
+}

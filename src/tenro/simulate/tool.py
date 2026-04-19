@@ -41,6 +41,7 @@ def verify(
     *,
     result: Any = _UNSET,
     where: Callable[[ToolCallSpan], bool] | None = None,
+    called_with: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> ToolCallSpan:
     """Verify a tool was called at least once (1+).
@@ -52,7 +53,11 @@ def verify(
         result: Expected return value (exact equality check). Use to verify
             the tool returned a specific value including None.
         where: Predicate filter for span selection.
-        **kwargs: Additional arguments for matching tool arguments.
+        called_with: Explicit dict of expected arguments. Use when an
+            argument name conflicts with another verify keyword (e.g.
+            ``result``, ``where``).
+        **kwargs: Expected keyword arguments to the tool call. Shorthand
+            for the common case where argument names don't clash.
 
     Returns:
         The matching tool call span.
@@ -60,6 +65,11 @@ def verify(
     verify_kwargs: dict[str, Any] = {"where": where}
     if result is not _UNSET:
         verify_kwargs["result"] = result
+    if called_with is not None:
+        # Construct.verify_tool forwards **kwargs to ToolVerifications.verify_tool,
+        # whose second positional parameter is `args_dict`. Passing it as a keyword
+        # routes the matcher correctly without changing Construct's signature.
+        verify_kwargs["args_dict"] = called_with
     span: ToolCallSpan = get_construct_or_raise().verify_tool(target, **verify_kwargs, **kwargs)
     return span
 

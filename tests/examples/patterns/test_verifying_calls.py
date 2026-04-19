@@ -16,12 +16,12 @@ from examples.myapp import (
     search_database,
 )
 
+import tenro
 from tenro import Provider, ToolCall
 from tenro.simulate import llm, tool
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_exact_call_count() -> None:
     """Verify a tool was called exactly N times."""
     tool.simulate(get_weather, result={"temp": 72, "condition": "sunny"})
@@ -39,7 +39,7 @@ def test_exact_call_count() -> None:
     llm.verify_many(Provider.OPENAI, count=2)
 
 
-@tenro
+@tenro.simulate
 def test_minimum_calls() -> None:
     """Verify at least N calls were made."""
     tool.simulate(get_weather, result={"temp": 70, "condition": "clear"})
@@ -57,7 +57,7 @@ def test_minimum_calls() -> None:
     llm.verify_many(Provider.OPENAI, at_least=1)
 
 
-@tenro
+@tenro.simulate
 def test_maximum_calls() -> None:
     """Verify no more than N calls were made."""
     tool.simulate(search_database, result=[{"id": 1}])
@@ -75,7 +75,7 @@ def test_maximum_calls() -> None:
     llm.verify_many(Provider.OPENAI, at_most=5)
 
 
-@tenro
+@tenro.simulate
 def test_call_count_range() -> None:
     """Verify calls fall within a range."""
     tool.simulate(get_weather, result={"temp": 75})
@@ -93,7 +93,7 @@ def test_call_count_range() -> None:
     llm.verify_many(Provider.OPENAI, at_least=1, at_most=5)
 
 
-@tenro
+@tenro.simulate
 def test_verify_at_least_once() -> None:
     """Verify a tool was called at least once (1 or more).
 
@@ -116,7 +116,7 @@ def test_verify_at_least_once() -> None:
     llm.verify(Provider.OPENAI)
 
 
-@tenro
+@tenro.simulate
 def test_verify_exactly_once() -> None:
     """Verify a tool was called exactly once (not 0, not 2+).
 
@@ -138,7 +138,7 @@ def test_verify_exactly_once() -> None:
     llm.verify_many(Provider.OPENAI, count=2)
 
 
-@tenro
+@tenro.simulate
 def test_verify_never_called() -> None:
     """Verify a tool was never called."""
     # LLM answers directly without using tools

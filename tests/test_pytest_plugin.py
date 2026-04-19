@@ -57,8 +57,8 @@ def test_autopatch_enabled():
         assert result.returncode == 0, f"Test failed: {result.stdout}\n{result.stderr}"
         assert "1 passed" in result.stdout
 
-    def test_strict_expectations_flag_recognized(self, tmp_path: pytest.TempPathFactory) -> None:
-        """Verify --tenro-strict-expectations flag is recognized."""
+    def test_fail_unused_flag_recognized(self, tmp_path: pytest.TempPathFactory) -> None:
+        """Verify --tenro-fail-unused flag is recognized."""
         test_file = tmp_path / "test_check.py"
         test_file.write_text(
             """
@@ -68,7 +68,7 @@ def test_placeholder():
         )
 
         result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(test_file), "--tenro-strict-expectations", "-v"],
+            [sys.executable, "-m", "pytest", str(test_file), "--tenro-fail-unused", "-v"],
             capture_output=True,
             text=True,
             cwd=tmp_path,

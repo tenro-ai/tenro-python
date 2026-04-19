@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from examples.myapp import ConversationAgent
 
+import tenro
 from tenro import Provider
 from tenro.simulate import llm
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_multi_turn_conversation() -> None:
     """Test agent handles multi-turn conversation with context."""
     llm.simulate(

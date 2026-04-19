@@ -8,9 +8,9 @@ Tests an agent that searches the web and summarizes findings.
 
 from __future__ import annotations
 
+import tenro
 from tenro import Provider, link_agent, link_llm, link_tool
 from tenro.simulate import llm, tool
-from tenro.testing import tenro
 
 # APPLICATION CODE
 
@@ -55,7 +55,7 @@ class ResearchAssistantAgent:
 # TESTS
 
 
-@tenro
+@tenro.simulate
 def test_research_agent_finds_and_summarizes():
     """Test that agent searches and synthesizes results."""
     # Control what tools and LLMs return
@@ -83,7 +83,7 @@ def test_research_agent_finds_and_summarizes():
     llm.verify_many(Provider.OPENAI, at_least=1)
 
 
-@tenro
+@tenro.simulate
 def test_research_agent_handles_no_results():
     """Test agent behavior when search returns nothing."""
     # Simulate empty search results

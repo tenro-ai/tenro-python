@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from examples.myapp import TopicConversationAgent
 
+import tenro
 from tenro import Provider
 from tenro.simulate import llm
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_check_first_response() -> None:
     """Verify content in the first LLM response (default)."""
     llm.simulate(
@@ -33,7 +33,7 @@ def test_check_first_response() -> None:
     llm.verify(output_contains="Machine learning")
 
 
-@tenro
+@tenro.simulate
 def test_check_specific_response() -> None:
     """Verify content in a specific response by index."""
     llm.simulate(
@@ -52,7 +52,7 @@ def test_check_specific_response() -> None:
     llm.verify(output_contains="ERROR", call_index=None)
 
 
-@tenro
+@tenro.simulate
 def test_check_last_response() -> None:
     """Verify content in the last response using negative indexing."""
     llm.simulate(
@@ -70,7 +70,7 @@ def test_check_last_response() -> None:
     llm.verify(output_contains="completed", call_index=-1)
 
 
-@tenro
+@tenro.simulate
 def test_check_any_response() -> None:
     """Verify content exists in any response (permissive mode)."""
     llm.simulate(

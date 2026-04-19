@@ -5,21 +5,27 @@
 
 from __future__ import annotations
 
+import weakref
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tenro._construct.construct import Construct
 
-_constructs: list[Construct] = []
+_constructs: weakref.WeakSet[Construct] = weakref.WeakSet()
 
 
 def register_construct(construct: Construct) -> None:
     """Register a construct for session-wide export."""
-    _constructs.append(construct)
+    _constructs.add(construct)
+
+
+def unregister_construct(construct: Construct) -> None:
+    """Unregister a construct (called at fixture teardown)."""
+    _constructs.discard(construct)
 
 
 def get_constructs() -> list[Construct]:
-    """Get all registered constructs."""
+    """Get all currently-alive registered constructs."""
     return list(_constructs)
 
 

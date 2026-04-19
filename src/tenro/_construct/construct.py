@@ -9,6 +9,7 @@ and verification APIs for tests.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any
@@ -18,10 +19,15 @@ from tenro._construct.lifecycle import SpanAccessor, SpanLinker
 from tenro._construct.simulate.orchestrator import SimulationOrchestrator
 from tenro._construct.simulate.types import ResponsesInput
 from tenro._construct.span_store import SpanCollector, SpanStore
-from tenro._construct.verify import ConstructVerifications
+from tenro._construct.verify.agent import AgentVerifications
+from tenro._construct.verify.llm import LLMVerifications
+from tenro._construct.verify.llm_scope import LLMScopeVerifications
+from tenro._construct.verify.tool import ToolVerifications
 from tenro._core.lifecycle_manager import LifecycleManager
 from tenro._core.spans import AgentRun, LLMCall, ToolCall
 from tenro.providers import _BUILTIN_PROVIDER_VALUES, Provider
+
+logger = logging.getLogger(__name__)
 
 _UNSET: Any = object()
 
@@ -44,9 +50,8 @@ class Construct:
 
     def __init__(
         self,
-        blocked_llm_domains: list[str] | None = None,
         allow_real_llm_calls: bool = False,
-        strict_expectations: bool = False,
+        fail_unused: bool = False,
     ) -> None:
         """Initialize construct for tracking and simulation.
 
@@ -54,19 +59,15 @@ class Construct:
         tool calls. Test code runs inside the `with construct:` block.
 
         Args:
-            blocked_llm_domains: Domains that raise `UnexpectedLLMCallError` if
-                accessed without a simulation. Defaults to OpenAI, Anthropic,
-                and Gemini. Pass custom list to block different providers, or
-                empty list `[]` to disable blocking.
             allow_real_llm_calls: Allow HTTP requests to LLM providers without
-                simulations. When False (default), requests to blocked LLM
+                simulations. When False (default), requests to known LLM
                 domains without matching simulations raise `UnexpectedLLMCallError`,
                 preventing accidental real API calls that cost money or leak
                 credentials. Set to True for integration tests that intentionally
-                call real APIs. Equivalent to `blocked_llm_domains=[]`.
-            strict_expectations: If True, raise an error (instead of warning)
+                call real APIs.
+            fail_unused: If True, raise an error (instead of warning)
                 when simulations are set up but never used. Controlled via
-                --tenro-strict-expectations pytest flag.
+                --tenro-fail-unused pytest flag.
 
         Example:
             ```python
@@ -75,16 +76,13 @@ class Construct:
 
             # Allow real API calls (integration tests)
             construct = Construct(allow_real_llm_calls=True)
-
-            # Custom blocklist
-            construct = Construct(blocked_llm_domains=["api.cohere.ai"])
             ```
         """
-        self._strict_expectations = strict_expectations
+        self._fail_unused = fail_unused
         self._span_store = SpanStore()
         self._trace_id: str | None = None
 
-        effective_domains = [] if allow_real_llm_calls else blocked_llm_domains
+        effective_domains: list[str] | None = [] if allow_real_llm_calls else None
 
         self._handler = SpanCollector(self._span_store)
         self._lifecycle = LifecycleManager(handler=self._handler)
@@ -99,8 +97,6 @@ class Construct:
         )
         self._linker = SpanLinker(lifecycle=self._lifecycle)
         self._span_accessor = SpanAccessor(span_store=self._span_store)
-
-        self._verifications: ConstructVerifications | None = None
 
         self._provider_registry: dict[str, Provider] = {}  # normalized id → adapter
         self._default_provider_id: str | None = None  # always normalized string
@@ -159,7 +155,7 @@ class Construct:
                 llm_calls=self.llm_calls,
                 supported_providers=list(get_supported_providers()),
                 llm_scopes=self._span_accessor.get_llm_scopes(),
-                strict=self._strict_expectations,
+                strict=self._fail_unused,
             )
         finally:
             self._orchestrator.simulation_tracker.reset()
@@ -167,14 +163,14 @@ class Construct:
     def _check_unused_tool_simulations(self) -> None:
         """Check for unused tool simulations and raise errors immediately."""
         try:
-            self._orchestrator.tool_tracker.validate("tool", strict=self._strict_expectations)
+            self._orchestrator.tool_tracker.validate("tool", strict=self._fail_unused)
         finally:
             self._orchestrator.tool_tracker.reset()
 
     def _check_unused_agent_simulations(self) -> None:
         """Check for unused agent simulations and raise errors immediately."""
         try:
-            self._orchestrator.agent_tracker.validate("agent", strict=self._strict_expectations)
+            self._orchestrator.agent_tracker.validate("agent", strict=self._fail_unused)
         finally:
             self._orchestrator.agent_tracker.reset()
 
@@ -360,28 +356,28 @@ class Construct:
             ValueError: If string is unregistered or built-in used as string.
             ValueError: If string looks like a target (contains ".").
         """
-        # Catch common mistake: passing target string where provider is expected
         if isinstance(provider, str) and "." in provider:
             raise ValueError(
                 f"It looks like you passed a target string positionally. "
                 f"Use target='{provider}' instead."
             )
-
         if isinstance(provider, Provider):
             return (provider.value, provider)
 
         normalized = self._normalize_provider_id(provider)
-
-        # StrEnum members ARE strings, so this check must be explicit
         if normalized in _BUILTIN_PROVIDER_VALUES:
             raise ValueError(
                 f"Use Provider.{normalized.upper()} (enum) for built-in providers, "
                 f"not the string '{provider}'"
             )
-
         if normalized in self._provider_registry:
             return (normalized, self._provider_registry[normalized])
+        return self._resolve_registered_provider(normalized, provider)
 
+    def _resolve_registered_provider(
+        self, normalized: str, original: Provider | str
+    ) -> tuple[str, Provider]:
+        """Look up a custom/registry provider by normalized ID."""
         from tenro._construct.http.registry import ProviderRegistry
         from tenro._construct.http.registry.exceptions import UnsupportedProviderError
 
@@ -399,8 +395,8 @@ class Construct:
             pass
 
         msg = f"Unknown provider '{normalized}'."
-        if provider != normalized:
-            msg += f" (from {provider!r})"
+        if original != normalized:
+            msg += f" (from {original!r})"
         msg += " Register it first with tenro.register_provider()"
         raise ValueError(msg)
 
@@ -670,14 +666,25 @@ class Construct:
         finally:
             self._orchestrator.deactivate()
 
-    def _get_verifications(self) -> ConstructVerifications:
-        """Get verifications instance."""
-        return ConstructVerifications(
-            agent_runs=self._get_root_agent_runs(),
-            llm_calls=self.llm_calls,
-            tool_calls=self.tool_calls,
-            llm_scopes=self._span_accessor.get_llm_scopes(),
-        )
+    def _tool_verifier(self) -> ToolVerifications:
+        """Create tool verifier from current spans."""
+        return ToolVerifications(self.tool_calls, self._get_root_agent_runs())
+
+    def _agent_verifier(self) -> AgentVerifications:
+        """Create agent verifier from current spans."""
+        all_agents: list[AgentRun] = []
+        for agent in self._get_root_agent_runs():
+            all_agents.append(agent)
+            all_agents.extend(agent.get_child_agents(recursive=True))
+        return AgentVerifications(all_agents)
+
+    def _llm_verifier(self) -> LLMVerifications:
+        """Create LLM verifier from current spans."""
+        return LLMVerifications(self.llm_calls, self._get_root_agent_runs())
+
+    def _llm_scope_verifier(self) -> LLMScopeVerifications:
+        """Create LLM scope verifier from current spans."""
+        return LLMScopeVerifications(self._span_accessor.get_llm_scopes())
 
     def verify_tool(
         self,
@@ -714,7 +721,7 @@ class Construct:
         resolved_target = resolve_all_target_paths(target, is_tool=True)
         if result is not _UNSET:
             kwargs["output_exact"] = result
-        self._get_verifications().verify_tool(resolved_target, **kwargs)
+        self._tool_verifier().verify_tool(resolved_target, **kwargs)
         filtered = [t for t in self.tool_calls if t.target_path in resolved_target]
         if where:
             filtered = [t for t in filtered if where(t)]
@@ -738,7 +745,7 @@ class Construct:
         )
 
         resolved_target = resolve_all_target_paths(target, is_tool=True)
-        self._get_verifications().verify_tool_never(resolved_target)
+        self._tool_verifier().verify_tool_never(resolved_target)
 
     def verify_tool_sequence(self, expected_sequence: list[str]) -> None:
         """Verify tools were called in a specific order.
@@ -752,7 +759,7 @@ class Construct:
         Examples:
             >>> construct.verify_tool_sequence(["search", "summarize", "format"])
         """
-        self._get_verifications().verify_tool_sequence(expected_sequence)
+        self._tool_verifier().verify_tool_sequence(expected_sequence)
 
     def verify_tools(
         self,
@@ -778,7 +785,7 @@ class Construct:
             >>> construct.verify_tools(count=3)  # exactly 3 tool calls
             >>> construct.verify_tools(min=2, max=4)  # between 2 and 4 calls
         """
-        self._get_verifications().verify_tools(count=count, min=min, max=max, target=target)
+        self._tool_verifier().verify_tools(count=count, min=min, max=max, target=target)
 
     def verify_agent(
         self,
@@ -814,7 +821,7 @@ class Construct:
         resolved_target = resolve_all_target_paths(target)
         if result is not _UNSET:
             kwargs["output_exact"] = result
-        self._get_verifications().verify_agent(resolved_target, **kwargs)
+        self._agent_verifier().verify_agent(resolved_target, **kwargs)
         filtered = [a for a in self.agent_runs if a.target_path in resolved_target]
         if where:
             filtered = [a for a in filtered if where(a)]
@@ -838,7 +845,7 @@ class Construct:
         )
 
         resolved_target = resolve_all_target_paths(target)
-        self._get_verifications().verify_agent_never(resolved_target)
+        self._agent_verifier().verify_agent_never(resolved_target)
 
     def verify_agent_sequence(self, expected_sequence: list[str]) -> None:
         """Verify agents were called in a specific order.
@@ -852,7 +859,7 @@ class Construct:
         Examples:
             >>> construct.verify_agent_sequence(["Planner", "Executor", "Reviewer"])
         """
-        self._get_verifications().verify_agent_sequence(expected_sequence)
+        self._agent_verifier().verify_agent_sequence(expected_sequence)
 
     def verify_agents(
         self,
@@ -880,9 +887,7 @@ class Construct:
         from tenro._construct.simulate.target_resolution import resolve_all_target_paths
 
         resolved_target = resolve_all_target_paths(target) if target else None
-        self._get_verifications().verify_agents(
-            count=count, min=min, max=max, target=resolved_target
-        )
+        self._agent_verifier().verify_agents(count=count, min=min, max=max, target=resolved_target)
 
     def verify_llm(
         self,
@@ -918,7 +923,7 @@ class Construct:
             >>> construct.verify_llm(output_contains="weather")
         """
         provider_str = self._normalize_provider_for_filter(provider)
-        self._get_verifications().verify_llm(
+        self._llm_verifier().verify_llm(
             provider_str,
             target=target,
             count=count,
@@ -950,7 +955,7 @@ class Construct:
             >>> construct.verify_llm_never(Provider.ANTHROPIC)
         """
         provider_str = self._normalize_provider_for_filter(provider)
-        self._get_verifications().verify_llm_never(provider_str, target=target)
+        self._llm_verifier().verify_llm_never(provider_str, target=target)
 
     def verify_llms(
         self,
@@ -981,7 +986,7 @@ class Construct:
             >>> construct.verify_llms(Provider.ANTHROPIC)
         """
         provider_str = self._normalize_provider_for_filter(provider)
-        self._get_verifications().verify_llms(
+        self._llm_verifier().verify_llms(
             count=count, min=min, max=max, target=target, provider=provider_str
         )
 
@@ -1026,7 +1031,7 @@ class Construct:
             >>> construct.verify_llm_scope(output={"status": "ok"})
             >>> construct.verify_llm_scope(target=extract_entities, times=1)
         """
-        self._get_verifications().verify_llm_scope(
+        self._llm_scope_verifier().verify_llm_scope(
             target,
             times=times,
             scope_index=scope_index,
@@ -1161,65 +1166,26 @@ class Construct:
 
         self._validate_llm_params(response, responses, tool_calls)
 
-        # Resolve string paths to check the actual callable
         resolved_target = _resolve_string_target(target) if isinstance(target, str) else target
-
-        # For use_http=False with linked/registered targets, skip provider resolution
-        # (provider is only needed for HTTP adapter selection)
-        # Note: Only @link_llm (not @link_tool/@link_agent) is valid for simulate_llm
         is_simulatable_target = (
             resolved_target is not None
             and callable(resolved_target)
             and (_is_linked_type(resolved_target, "llm") or _is_registered_target(resolved_target))
         )
 
-        # Fail-fast for non-simulatable callable targets when use_http=False.
-        # Must happen BEFORE provider resolution which may fail on plain functions.
-        if (
-            use_http is False
-            and resolved_target is not None
-            and callable(resolved_target)
-            and not is_simulatable_target
-        ):
-            from tenro._construct.simulate.orchestrator import _detect_target_type
-            from tenro.errors.simulation import (
-                SimulationDiagnostic,
-                TenroSimulationSetupError,
-            )
-
-            target_name = getattr(resolved_target, "__qualname__", repr(target))
-            diagnostic = SimulationDiagnostic(
-                target_path=target_name,
-                target_type=_detect_target_type(resolved_target),
-                is_linked=False,
-                failure_reason=(
-                    "Target is not linked or registered; capture-safe interception unavailable."
-                ),
-                recommended_fix=(
-                    "Decorate with @link_llm, use tenro.register(), "
-                    "or use HTTP mode (use_http=True)."
-                ),
-            )
-            msg = (
-                f"Cannot simulate non-linked LLM target '{target_name}'.\n\n"
-                f"Reason: {diagnostic.failure_reason}\n"
-                f"Fix: {diagnostic.recommended_fix}"
-            )
-            raise TenroSimulationSetupError(msg, diagnostic=diagnostic)
+        if use_http is False and resolved_target is not None and callable(resolved_target):
+            self._assert_simulatable_target(resolved_target, is_simulatable_target, target)
 
         if use_http is False and is_simulatable_target:
-            # Synthetic provider needed - dispatch doesn't require HTTP
-            provider_id = "custom"
-            adapter_value = "openai"  # Default value, unused in non-HTTP mode
+            provider_id, adapter_value = "custom", "openai"
         else:
-            # Resolve provider to (provider_id, adapter) tuple
             provider_id, adapter = self._resolve_provider(provider=provider, target=target)
             adapter_value = adapter.value
 
         self._orchestrator.simulate_llm(
             target=target,
-            provider=provider_id,  # Provider ID for tracking/verification
-            adapter=adapter_value,  # Adapter for HTTP endpoint selection
+            provider=provider_id,
+            adapter=adapter_value,
             response=response,
             responses=responses,
             model=model,
@@ -1227,6 +1193,37 @@ class Construct:
             use_http=use_http,
             optional=optional,
             **response_kwargs,
+        )
+
+    def _assert_simulatable_target(
+        self,
+        resolved: object,
+        is_simulatable: bool,
+        original: str | Callable[..., Any] | None,
+    ) -> None:
+        """Raise if use_http=False target is not linked or registered."""
+        if is_simulatable:
+            return
+        from tenro._construct.simulate.orchestrator import _detect_target_type
+        from tenro.errors.simulation import SimulationDiagnostic, TenroSimulationSetupError
+
+        target_name = getattr(resolved, "__qualname__", repr(original))
+        diagnostic = SimulationDiagnostic(
+            target_path=target_name,
+            target_type=_detect_target_type(resolved),
+            is_linked=False,
+            failure_reason=(
+                "Target is not linked or registered; capture-safe interception unavailable."
+            ),
+            recommended_fix=(
+                "Decorate with @link_llm, use tenro.register(), or use HTTP mode (use_http=True)."
+            ),
+        )
+        raise TenroSimulationSetupError(
+            f"Cannot simulate non-linked LLM target '{target_name}'.\n\n"
+            f"Reason: {diagnostic.failure_reason}\n"
+            f"Fix: {diagnostic.recommended_fix}",
+            diagnostic=diagnostic,
         )
 
     def _handle_http_call(

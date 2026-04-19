@@ -25,9 +25,9 @@ from __future__ import annotations
 
 import unittest
 
+import tenro
 from tenro import Construct, LLMResponse, Provider, ToolCall, link_agent, link_llm, link_tool
 from tenro.simulate import llm, tool
-from tenro.testing import tenro
 
 # ============================================================================
 # APPLICATION CODE - Tools
@@ -185,7 +185,7 @@ defensive_agent = DefensiveAgent()
 # ============================================================================
 
 
-@tenro
+@tenro.simulate
 def test_openai_single_tool_call() -> None:
     """OpenAI: Single tool call using ToolCall() helper."""
     llm.simulate(
@@ -204,7 +204,7 @@ def test_openai_single_tool_call() -> None:
     assert tool.calls()[0].display_name == "search"
 
 
-@tenro
+@tenro.simulate
 def test_openai_multiple_tool_calls() -> None:
     """OpenAI: Multiple tool calls in parallel."""
     llm.simulate(
@@ -227,7 +227,7 @@ def test_openai_multiple_tool_calls() -> None:
     tool.verify_many(get_weather, count=1)
 
 
-@tenro
+@tenro.simulate
 def test_openai_multi_turn() -> None:
     """OpenAI: Multi-turn with per-response tool calls."""
     llm.simulate(
@@ -246,7 +246,7 @@ def test_openai_multi_turn() -> None:
     assert len(llm.calls()) == 2
 
 
-@tenro
+@tenro.simulate
 def test_openai_with_string_name() -> None:
     """OpenAI: ToolCall with string name."""
     llm.simulate(
@@ -266,7 +266,7 @@ def test_openai_with_string_name() -> None:
 # ============================================================================
 
 
-@tenro
+@tenro.simulate
 def test_anthropic_single_tool_call() -> None:
     """Anthropic: Single tool call using ToolCall() helper."""
     llm.simulate(
@@ -284,7 +284,7 @@ def test_anthropic_single_tool_call() -> None:
     assert llm.calls()[0].provider == "anthropic"
 
 
-@tenro
+@tenro.simulate
 def test_anthropic_multiple_tool_calls() -> None:
     """Anthropic: Multiple tool calls in a single response."""
     llm.simulate(
@@ -306,7 +306,7 @@ def test_anthropic_multiple_tool_calls() -> None:
     tool.verify_many(count=2)
 
 
-@tenro
+@tenro.simulate
 def test_anthropic_with_string_name() -> None:
     """Anthropic: ToolCall with string name."""
     llm.simulate(
@@ -326,7 +326,7 @@ def test_anthropic_with_string_name() -> None:
 # ============================================================================
 
 
-@tenro
+@tenro.simulate
 def test_gemini_single_tool_call() -> None:
     """Gemini: Single tool call using ToolCall() helper."""
     llm.simulate(
@@ -342,7 +342,7 @@ def test_gemini_single_tool_call() -> None:
     assert llm.calls()[0].provider == "gemini"
 
 
-@tenro
+@tenro.simulate
 def test_gemini_multiple_tool_calls() -> None:
     """Gemini: Multiple tool calls in a single response."""
     llm.simulate(
@@ -364,7 +364,7 @@ def test_gemini_multiple_tool_calls() -> None:
     tool.verify_many(count=2)
 
 
-@tenro
+@tenro.simulate
 def test_gemini_with_string_name() -> None:
     """Gemini: ToolCall with string name."""
     llm.simulate(
@@ -503,7 +503,7 @@ class TestGeminiToolCalls(unittest.TestCase):
 # ============================================================================
 
 
-@tenro
+@tenro.simulate
 def test_llm_requests_nonexistent_tool() -> None:
     """Test agent handling of LLM requesting a tool that doesn't exist.
 
@@ -529,7 +529,7 @@ def test_llm_requests_nonexistent_tool() -> None:
     assert llm_call.response is not None
 
 
-@tenro
+@tenro.simulate
 def test_llm_requests_tool_with_invalid_args() -> None:
     """Test agent handling of LLM providing invalid arguments to a tool.
 
@@ -563,7 +563,7 @@ def test_llm_requests_tool_with_invalid_args() -> None:
 #   responses=[LLMResponse([A, B, C])]  → 1 LLM call with interleaved content
 
 
-@tenro
+@tenro.simulate
 def test_single_turn_vs_multiple_turns() -> None:
     """Outer list = number of LLM calls. LLMResponse = content within one call.
 
@@ -576,7 +576,7 @@ def test_single_turn_vs_multiple_turns() -> None:
     llm.verify_many(Provider.OPENAI, count=2)
 
 
-@tenro
+@tenro.simulate
 def test_anthropic_interleaved_single_turn() -> None:
     """Anthropic: ONE call with interleaved text + tool calls.
 
@@ -605,7 +605,7 @@ def test_anthropic_interleaved_single_turn() -> None:
     tool.verify_many(count=2)
 
 
-@tenro
+@tenro.simulate
 def test_gemini_interleaved_single_turn() -> None:
     """Gemini: ONE call with interleaved content. Block order preserved."""
     llm.simulate(
@@ -620,7 +620,7 @@ def test_gemini_interleaved_single_turn() -> None:
     tool.verify(search)
 
 
-@tenro
+@tenro.simulate
 def test_openai_blocks_flattened() -> None:
     """OpenAI: Blocks are flattened (no interleaving support).
 
@@ -639,7 +639,7 @@ def test_openai_blocks_flattened() -> None:
     tool.verify(search)
 
 
-@tenro
+@tenro.simulate
 def test_llmresponse_tool_calls_only() -> None:
     """LLMResponse with tool calls only (no text)."""
     llm.simulate(
@@ -654,7 +654,7 @@ def test_llmresponse_tool_calls_only() -> None:
     tool.verify(search)
 
 
-@tenro
+@tenro.simulate
 def test_list_shorthand_equals_llmresponse() -> None:
     """List shorthand is equivalent to LLMResponse(blocks=[...])."""
     llm.simulate(

@@ -21,6 +21,7 @@ from tenro.trace.icons import (
     VERTICAL,
     get_span_icon,
 )
+from tenro.trace.span_io import build_footer, get_input, get_output
 
 if TYPE_CHECKING:
     from tenro._core.spans import AgentRun, BaseSpan
@@ -91,28 +92,18 @@ class TraceRenderer:
             lines.extend(self._build_agent_tree(agent))
 
         # Footer with summary
-        lines.extend(self._build_footer(agents))
+        lines.extend(build_footer(agents))
 
         return "\n".join(lines)
 
     def _build_header(self, test_name: str | None) -> list[str]:
         """Build the header section."""
-        lines: list[str] = []
         title = f"Trace: {test_name}" if test_name else "Trace"
-        lines.append(f"\n[bold]{title}[/bold]")
-        lines.append("[dim]" + "\u2500" * 64 + "[/dim]")
-        lines.append("")
-        return lines
+        return [f"\n[bold]{title}[/bold]", "[dim]" + "\u2500" * 64 + "[/dim]", ""]
 
     def _build_agent_tree(self, agent: AgentRun) -> list[str]:
         """Build tree for a single root agent."""
-        lines: list[str] = []
-
-        lines.append(self._format_span_header(agent))
-
-        lines.extend(self._build_span_content(agent, SPACE))
-
-        return lines
+        return [self._format_span_header(agent), *self._build_span_content(agent, SPACE)]
 
     def _build_tree(
         self, spans: Sequence[BaseSpan], indent: str, has_output_after: bool = False
@@ -162,7 +153,7 @@ class TraceRenderer:
 
     def _build_span_content(self, span: BaseSpan, indent: str) -> list[str]:
         """Build input, children, and output for any span type."""
-        from tenro._core.spans import AgentRun, LLMCall, LLMScope, ToolCall
+        from tenro._core.spans import AgentRun, LLMScope, ToolCall
 
         lines: list[str] = []
 
@@ -170,49 +161,74 @@ class TraceRenderer:
         if isinstance(span, AgentRun) and span.spans:
             children = self._reorganize_spans_for_display(span.spans)
         elif isinstance(span, (LLMScope, ToolCall)):
-            # LLMScope/ToolCall may have virtual children attached by reorganize
             children = getattr(span, "_render_children", [])
 
-        if not self._config.show_io_preview:
-            if children:
-                lines.append(f"{indent}{VERTICAL}")
-                lines.extend(self._build_tree(children, indent))
-            return lines
-
-        input_result = self._get_input(span)
-        output_result = self._get_output(span)
+        input_result = get_input(span)
+        output_result = get_output(span)
         has_children = bool(children)
 
-        # Determine semantic labels based on span type
+        in_label = self._input_label(span)
+        self._append_input_line(lines, indent, in_label, input_result, has_children, output_result)
+        self._append_children(lines, indent, children, output_result, span.error)
+        self._append_output_or_error(lines, indent, span, output_result, has_children)
+        self._append_tool_requests(lines, indent, span)
+
+        return lines
+
+    def _input_label(self, span: BaseSpan) -> str:
+        """Return semantic label for input based on span type."""
+        from tenro._core.spans import AgentRun, LLMCall
+
         if isinstance(span, AgentRun):
-            in_label = "user: "
-            out_label = ""
-        elif isinstance(span, LLMCall):
-            in_label = "prompt: "
-            out_label = ""
-        elif isinstance(span, ToolCall):
-            in_label = ""
-            out_label = ""
-        else:
-            in_label = ""
-            out_label = ""
+            return "user: "
+        if isinstance(span, LLMCall):
+            return "prompt: "
+        return ""
 
-        # Input (always before children)
-        if input_result is not None:
-            text, needs_quotes = input_result
-            preview = self._truncate(text, self._config.max_preview_length)
-            formatted = f'"{preview}"' if needs_quotes else preview
-            connector = BRANCH if (has_children or output_result is not None) else LAST
-            lines.append(f"{indent}{connector} {ARROW_IN} {in_label}{formatted}")
+    def _append_input_line(
+        self,
+        lines: list[str],
+        indent: str,
+        label: str,
+        input_result: tuple[str, bool] | None,
+        has_children: bool,
+        output_result: tuple[str, bool] | None,
+    ) -> None:
+        """Append formatted input line if present."""
+        if input_result is None:
+            return
+        text, needs_quotes = input_result
+        preview = self._truncate(text, self._config.max_preview_length)
+        formatted = f'"{preview}"' if needs_quotes else preview
+        connector = BRANCH if (has_children or output_result is not None) else LAST
+        lines.append(f"{indent}{connector} {ARROW_IN} {label}{formatted}")
 
-        # Children (agents have spans, LLMScopes have virtual children)
-        if children:
-            lines.append(f"{indent}{VERTICAL}")
-            has_output = output_result is not None or span.error is not None
-            lines.extend(self._build_tree(children, indent, has_output_after=has_output))
+    def _append_children(
+        self,
+        lines: list[str],
+        indent: str,
+        children: list[BaseSpan],
+        output_result: tuple[str, bool] | None,
+        error: str | None,
+    ) -> None:
+        """Append child span tree if present."""
+        if not children:
+            return
+        lines.append(f"{indent}{VERTICAL}")
+        has_output = output_result is not None or error is not None
+        lines.extend(self._build_tree(children, indent, has_output_after=has_output))
 
-        # Error or Output (always after children)
-        # For LLMCall, check if tool_calls exist to determine final connector
+    def _append_output_or_error(
+        self,
+        lines: list[str],
+        indent: str,
+        span: BaseSpan,
+        output_result: tuple[str, bool] | None,
+        has_children: bool,
+    ) -> None:
+        """Append error or output line after children."""
+        from tenro._core.spans import LLMCall
+
         has_tool_calls = isinstance(span, LLMCall) and span.tool_calls
 
         if span.error:
@@ -227,16 +243,16 @@ class TraceRenderer:
             if has_children:
                 lines.append(f"{indent}{VERTICAL}")
             connector = BRANCH if has_tool_calls else LAST
-            lines.append(f"{indent}{connector} {ARROW_OUT} {out_label}{formatted}")
+            lines.append(f"{indent}{connector} {ARROW_OUT} {formatted}")
 
-        # Show tools the LLM requested
-        if has_tool_calls:
-            assert isinstance(span, LLMCall)  # for type narrowing
-            tool_names = [tc.get("name", "?") for tc in span.tool_calls]  # type: ignore[union-attr]
-            tools_str = ", ".join(tool_names)
-            lines.append(f"{indent}{LAST} 🔧 requests: {tools_str}")
+    def _append_tool_requests(self, lines: list[str], indent: str, span: BaseSpan) -> None:
+        """Append tool request line for LLM calls."""
+        from tenro._core.spans import LLMCall
 
-        return lines
+        if not (isinstance(span, LLMCall) and span.tool_calls):
+            return
+        tool_names = [tc.get("name", "?") for tc in span.tool_calls]
+        lines.append(f"{indent}{LAST} 🔧 requests: {', '.join(tool_names)}")
 
     def _format_span_header(self, span: BaseSpan) -> str:
         """Format span header with icon, name, status."""
@@ -259,87 +275,16 @@ class TraceRenderer:
             icon = "?"
             name = "unknown"
 
+        # Add [SIM] marker for simulated spans if enabled
+        sim_marker = ""
+        if self._config.show_simulation_marker and getattr(span, "simulated", False):
+            sim_marker = " [dim]\\[SIM][/dim]"
+
         # Only show ERR on error, nothing on success
         if span.error:
             padding = " " * max(0, 55 - len(name))
-            return f"{icon} [bold]{name}[/bold]{padding} [bold red]ERR[/bold red]"
-        return f"{icon} [bold]{name}[/bold]"
-
-    def _get_input(self, span: BaseSpan) -> tuple[str, bool] | None:
-        """Extract input text from span.
-
-        Args:
-            span: The span to extract input from.
-
-        Returns:
-            Tuple of (text, is_quoted) or None. is_quoted indicates if quotes needed.
-        """
-        from tenro._core.spans import AgentRun, LLMCall, LLMScope, ToolCall
-
-        if isinstance(span, AgentRun):
-            if span.input_data is not None:
-                data = span.input_data
-                # Unwrap single-element tuples (common from *args capture)
-                if isinstance(data, tuple) and len(data) == 1:
-                    data = data[0]
-                if isinstance(data, str):
-                    return (data, True)
-                return (repr(data), False)
-            return None
-        elif isinstance(span, LLMScope):
-            # LLMScope: format as (args, kwargs)
-            parts: list[str] = []
-            if span.input_data:
-                if len(span.input_data) == 1 and isinstance(span.input_data[0], str):
-                    parts.append(repr(span.input_data[0]))
-                else:
-                    parts.extend(repr(a) for a in span.input_data)
-            if span.input_kwargs:
-                parts.extend(f"{k}={v!r}" for k, v in span.input_kwargs.items())
-            return (", ".join(parts), False) if parts else None
-        elif isinstance(span, LLMCall):
-            if span.messages:
-                last_msg = span.messages[-1]
-                content = last_msg.get("content", "")
-                return (str(content), True) if content else None
-            return None
-        elif isinstance(span, ToolCall):
-            parts = []
-            if span.args:
-                parts.extend(repr(a) for a in span.args)
-            if span.kwargs:
-                parts.extend(f"{k}={v!r}" for k, v in span.kwargs.items())
-            return (", ".join(parts), False) if parts else None
-        return None
-
-    def _get_output(self, span: BaseSpan) -> tuple[str, bool] | None:
-        """Extract output text from span.
-
-        Args:
-            span: The span to extract output from.
-
-        Returns:
-            Tuple of (text, is_quoted) or None. is_quoted indicates if quotes needed.
-        """
-        from tenro._core.spans import AgentRun, LLMCall, LLMScope, ToolCall
-
-        if isinstance(span, (AgentRun, LLMScope)):
-            if span.output_data is not None:
-                if isinstance(span.output_data, str):
-                    return (span.output_data, True)
-                return (repr(span.output_data), False)
-            return None
-        elif isinstance(span, LLMCall):
-            if span.response:
-                return (span.response, True)
-            return None
-        elif isinstance(span, ToolCall):
-            if span.result is not None:
-                if isinstance(span.result, str):
-                    return (span.result, True)
-                return (repr(span.result), False)
-            return None
-        return None
+            return f"{icon} [bold]{name}[/bold]{sim_marker}{padding} [bold red]ERR[/bold red]"
+        return f"{icon} [bold]{name}[/bold]{sim_marker}"
 
     def _truncate(self, text: str, max_length: int) -> str:
         """Truncate text with ellipsis."""
@@ -347,46 +292,3 @@ class TraceRenderer:
         if len(clean) <= max_length:
             return clean
         return clean[: max_length - 3] + "..."
-
-    def _build_footer(self, agents: list[AgentRun]) -> list[str]:
-        """Build the footer with summary statistics."""
-        lines: list[str] = []
-        lines.append("")
-        lines.append("[dim]" + "\u2500" * 64 + "[/dim]")
-
-        stats = self._count_spans(agents)
-        summary_parts = [
-            f"{stats['agents']} agent{'s' if stats['agents'] != 1 else ''}",
-            f"{stats['llm_calls']} LLM call{'s' if stats['llm_calls'] != 1 else ''}",
-            f"{stats['tool_calls']} tool call{'s' if stats['tool_calls'] != 1 else ''}",
-        ]
-
-        if agents:
-            total_ms = sum(a.latency_ms or 0.0 for a in agents)
-            duration = f"{total_ms / 1000:.2f}s" if total_ms >= 1000 else f"{total_ms:.0f}ms"
-            summary_parts.append(f"Total: {duration}")
-
-        lines.append(f"[dim]Summary: {' | '.join(summary_parts)}[/dim]")
-        lines.append("")
-        return lines
-
-    def _count_spans(self, agents: list[AgentRun]) -> dict[str, int]:
-        """Count spans by type."""
-        from tenro._core.spans import AgentRun, LLMCall, ToolCall
-
-        counts = {"agents": 0, "llm_calls": 0, "tool_calls": 0}
-
-        def count_recursive(agent: AgentRun) -> None:
-            counts["agents"] += 1
-            for span in agent.spans:
-                if isinstance(span, AgentRun):
-                    count_recursive(span)
-                elif isinstance(span, LLMCall):
-                    counts["llm_calls"] += 1
-                elif isinstance(span, ToolCall):
-                    counts["tool_calls"] += 1
-
-        for agent in agents:
-            count_recursive(agent)
-
-        return counts

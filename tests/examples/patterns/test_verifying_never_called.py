@@ -16,12 +16,12 @@ from examples.myapp import (
     get_cached_data,
 )
 
+import tenro
 from tenro import Provider
 from tenro.simulate import llm, tool
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_cache_hit_skips_api() -> None:
     """When cache hits, expensive API should never be called."""
     # Cache returns data
@@ -36,7 +36,7 @@ def test_cache_hit_skips_api() -> None:
     tool.verify_never(fetch_from_api)
 
 
-@tenro
+@tenro.simulate
 def test_dangerous_operation_not_triggered() -> None:
     """Verify dangerous operations don't happen accidentally."""
     # Note: Don't simulate delete_all_records since unconfirmed mode won't call it
@@ -47,7 +47,7 @@ def test_dangerous_operation_not_triggered() -> None:
     tool.verify_never(delete_all_records)
 
 
-@tenro
+@tenro.simulate
 def test_llm_not_called_for_cached_response() -> None:
     """Verify LLM isn't called when response is cached."""
     # This test demonstrates verify_llm_never - no simulation needed

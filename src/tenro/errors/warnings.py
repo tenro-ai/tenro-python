@@ -98,6 +98,14 @@ class TenroPatchingWarning(TenroWarning):
     """
 
 
+class TenroExportWarning(TenroWarning):
+    """Emitted when span export fails after retries.
+
+    The test result is unaffected. Suppress with:
+        ``warnings.filterwarnings("ignore", category=TenroExportWarning)``
+    """
+
+
 class TenroLateImportWarning(TenroWarning):
     """Emitted when modules are imported before Tenro can patch them.
 

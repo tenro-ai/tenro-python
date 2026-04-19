@@ -14,9 +14,9 @@ import json
 
 from examples.experimental.crewai.myapp.agents import CustomerSupportAgent, search_kb
 
+import tenro
 from tenro import Provider
 from tenro.simulate import agent, llm, tool
-from tenro.testing import tenro
 
 
 def react_action(tool_name: str, tool_input: dict) -> str:
@@ -33,7 +33,7 @@ def react_final(answer: str) -> str:
     return f"Thought: I now know the final answer.\nFinal Answer: {answer}\n"
 
 
-@tenro
+@tenro.simulate
 def test_customer_support_answers_question() -> None:
     """Test customer support agent uses knowledge base and LLM."""
     tool.simulate(search_kb.func, result="Full refunds within 30 days.")

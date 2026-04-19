@@ -8,12 +8,12 @@ from __future__ import annotations
 from examples.experimental.pydantic_ai.myapp.agents import RAGPipeline
 from examples.myapp import fetch_documents
 
+import tenro
 from tenro import Provider, ToolCall
 from tenro.simulate import agent, llm, tool
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_rag_pipeline_synthesizes_answer() -> None:
     """Test RAG pipeline fetches documents and generates answer."""
     tool.simulate(

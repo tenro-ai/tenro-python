@@ -1,35 +1,46 @@
 # Copyright 2026 Tenro.ai
 # SPDX-License-Identifier: Apache-2.0
 
-"""Pytest integration utilities.
+"""Pytest integration utilities (deprecated).
 
-Provides the @tenro decorator for enabling the construct fixture.
+.. deprecated:: 0.3.0
+    Use ``@tenro.simulate`` instead. Will be removed in 0.5.0.
 
-Examples:
-    >>> from tenro.testing import tenro
-    >>> from tenro.simulate import llm
-    >>>
-    >>> @tenro
-    ... def test_my_agent():
-    ...     llm.simulate(response="Hello!")
-    ...     result = my_agent.run()
-    ...     assert "Hello" in result
-    >>>
-    >>> @tenro
-    ... class TestMyAgent:
-    ...     def test_one(self): ...
-    ...     def test_two(self): ...
+    Before::
+
+        from tenro.testing import tenro
+
+        @tenro
+        def test_my_agent(): ...
+
+    After::
+
+        import tenro
+
+        @tenro.simulate
+        def test_my_agent(): ...
 """
 
 from __future__ import annotations
 
-import pytest
+import warnings
 
-tenro = pytest.mark.usefixtures("construct")
-"""Pytest decorator that enables the construct fixture.
 
-Equivalent to @pytest.mark.usefixtures("construct") but more concise.
-Apply to test functions or classes to enable LLM/tool simulation.
-"""
+def __getattr__(name: str) -> object:
+    """Emit deprecation warning on access to ``tenro.testing.tenro``."""
+    if name == "tenro":
+        warnings.warn(
+            "tenro.testing.tenro is deprecated. "
+            "Use 'import tenro' and '@tenro.simulate' instead. "
+            "Will be removed in tenro 0.5.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        import pytest
 
-__all__ = ["tenro"]
+        return pytest.mark.usefixtures("construct")
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = ["tenro"]  # noqa: F822 — dynamic via __getattr__

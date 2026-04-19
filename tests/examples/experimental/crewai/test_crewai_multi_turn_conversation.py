@@ -10,9 +10,9 @@ Simulated responses must match this format.
 
 from __future__ import annotations
 
+import tenro
 from tenro import Provider
 from tenro.simulate import llm
-from tenro.testing import tenro
 
 
 def react_final(answer: str) -> str:
@@ -20,7 +20,7 @@ def react_final(answer: str) -> str:
     return f"Thought: I know the answer.\nFinal Answer: {answer}\n"
 
 
-@tenro
+@tenro.simulate
 def test_simple_crewai_task() -> None:
     """Test a simple CrewAI task without memory (no chromadb)."""
     from crewai import Agent, Crew, Task

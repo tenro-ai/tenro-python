@@ -88,15 +88,19 @@ class TenroUnexpectedLLMCallError(TenroVerificationError):
 
         Args:
             domain: The blocked domain (e.g., "api.openai.com").
-            url: The full URL of the blocked request.
+            url: The full URL of the blocked request. Available
+                programmatically via ``self.url`` for diagnostics, but
+                deliberately omitted from the human-readable message to
+                avoid leaking paths or query parameters into pytest /
+                JUnit / HTML report artifacts.
         """
+        from tenro._block_message import resolution_guidance
+
         self.domain = domain
         self.url = url
         super().__init__(
-            f"Unmatched request to '{domain}' would hit real API: {url}\n\n"
-            "To fix:\n"
-            "  1. Add simulation: construct.simulate_llm(provider=..., response=...)\n"
-            "  2. Or allow real calls: Construct(allow_real_llm_calls=True)"
+            f"Tenro blocked a real call to {domain} (no simulation set up).\n\n"
+            f"{resolution_guidance(domain)}"
         )
 
 

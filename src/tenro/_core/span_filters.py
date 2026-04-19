@@ -18,10 +18,10 @@ T = TypeVar("T", bound="BaseSpan")
 
 
 def filter_by_agent(agent: str | None, spans: list[T], agent_runs: list[AgentRun]) -> list[T]:
-    """Filter spans by agent name using agent_id relationship.
+    """Filter spans by agent name using agent_span_id relationship.
 
     Works with any span type (ToolCall, LLMCall, AgentRun):
-    - ToolCall/LLMCall: Filters by agent_id (the agent that made the call)
+    - ToolCall/LLMCall: Filters by agent_span_id (the agent that made the call)
     - AgentRun: Filters by parent_agent_id (child agents spawned by parent)
 
     Args:
@@ -59,7 +59,7 @@ def filter_by_agent(agent: str | None, spans: list[T], agent_runs: list[AgentRun
         if isinstance(span, AgentRunClass):
             if span.parent_agent_id in matching_ids:
                 result.append(span)
-        elif span.agent_id in matching_ids:
+        elif span.agent_span_id in matching_ids:
             result.append(span)
     return result
 

@@ -13,18 +13,11 @@ Examples:
 
 from __future__ import annotations
 
-_SUBMODULES = ("errors", "evals", "spans", "testing")
+_SUBMODULES = ("errors", "evals", "simulate", "spans", "testing")
 
 
-def _load_symbol(name: str) -> object | None:
-    """Load a public symbol by name.
-
-    Args:
-        name: Symbol name to import.
-
-    Returns:
-        The imported symbol, or None if not found.
-    """
+def _load_core_symbol(name: str) -> object | None:
+    """Load a core public symbol by name."""
     if name == "Construct":
         from tenro.construct import Construct
 
@@ -57,6 +50,11 @@ def _load_symbol(name: str) -> object | None:
         from tenro.tool_calls import tc
 
         return tc
+    return None
+
+
+def _load_linking_symbol(name: str) -> object | None:
+    """Load a linking decorator by name."""
     if name == "link_agent":
         from tenro.linking import link_agent
 
@@ -70,6 +68,11 @@ def _load_symbol(name: str) -> object | None:
 
         return link_tool
     return None
+
+
+def _load_symbol(name: str) -> object | None:
+    """Load a public symbol by name."""
+    return _load_core_symbol(name) or _load_linking_symbol(name)
 
 
 def _load_submodule(name: str) -> object | None:
@@ -89,6 +92,10 @@ def _load_submodule(name: str) -> object | None:
         import tenro.evals
 
         return tenro.evals
+    if name == "simulate":
+        import tenro.simulate
+
+        return tenro.simulate
     if name == "spans":
         import tenro.spans
 

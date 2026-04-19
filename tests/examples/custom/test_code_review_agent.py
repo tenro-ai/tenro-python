@@ -8,9 +8,9 @@ Tests an agent that reviews pull requests and suggests improvements.
 
 from __future__ import annotations
 
+import tenro
 from tenro import Provider, link_agent, link_llm, link_tool
 from tenro.simulate import llm, tool
-from tenro.testing import tenro
 
 # APPLICATION CODE
 
@@ -54,7 +54,7 @@ class CodeReviewAgent:
 # TESTS
 
 
-@tenro
+@tenro.simulate
 def test_code_review_agent_finds_security_issue():
     """Test that agent identifies code issues."""
     # Control what tools and LLMs return
@@ -78,7 +78,7 @@ def test_code_review_agent_finds_security_issue():
     llm.verify(output_contains="Security issue")
 
 
-@tenro
+@tenro.simulate
 def test_code_review_agent_approves_clean_code():
     """Test agent with well-formatted code."""
     # Simulate well-formatted PR

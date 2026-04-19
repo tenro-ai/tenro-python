@@ -7,14 +7,14 @@ from __future__ import annotations
 
 from myapp.agents import Researcher, Writer
 
+import tenro
 from tenro.simulate import agent
-from tenro.testing import tenro
 
 
 class TestAgentSimulation:
     """Agent simulation and verification."""
 
-    @tenro
+    @tenro.simulate
     def test_single_result(self) -> None:
         """Simulate an agent returning a single result."""
         agent.simulate(Researcher, result="Research complete")
@@ -24,8 +24,10 @@ class TestAgentSimulation:
         assert result == "Research complete"
         run = agent.verify(Researcher)
         assert run.simulated is True
+        assert run.agent_id == "agt_researcher"
+        assert run.version == "1.0.0"
 
-    @tenro
+    @tenro.simulate
     def test_sequential_results(self) -> None:
         """Simulate an agent returning different results on each call."""
         agent.simulate(Writer, results=["Draft 1", "Draft 2"])

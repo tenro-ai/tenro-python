@@ -44,7 +44,7 @@ def construct(request: pytest.FixtureRequest) -> Generator[Construct, None, None
         Pre-activated Construct instance.
 
     Example (recommended - use module-level API):
-        >>> @tenro
+        >>> @tenro.simulate
         ... def test_my_agent():
         ...     from tenro.simulate import llm
         ...     llm.simulate(Provider.OPENAI, response="Hello")

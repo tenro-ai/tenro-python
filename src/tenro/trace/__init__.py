@@ -7,13 +7,13 @@ Provides tools for visualizing trace output during test runs for debugging
 and development purposes.
 
 Enable trace output via:
-    - Environment variable: TENRO_TRACE=true
-    - Pytest flag: --tenro-trace
+    - Environment variable: TENRO_PRINT_TRACE=true
+    - Pytest flag: --tenro-print-trace
 
 Example:
     >>> # Enable via environment
     >>> import os
-    >>> os.environ["TENRO_TRACE"] = "true"
+    >>> os.environ["TENRO_PRINT_TRACE"] = "true"
     >>>
     >>> # Or check if enabled
     >>> from tenro.trace import is_trace_enabled

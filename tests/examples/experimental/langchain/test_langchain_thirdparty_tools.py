@@ -26,15 +26,15 @@ from examples.experimental.langchain.myapp.research_agent_openai import (
 )
 from langchain_community import tools as lc_tools
 
+import tenro
 from tenro import Provider
 from tenro.simulate import agent, llm, register, tool
-from tenro.testing import tenro
 
 # langchain-google-genai validates API key at init time (unlike OpenAI/Anthropic)
 os.environ.setdefault("GOOGLE_API_KEY", "test-key-for-simulation")
 
 
-@tenro
+@tenro.simulate
 def test_research_agent_with_openai() -> None:
     """Test agent using DuckDuckGo and Wikipedia tools with OpenAI."""
     register(lc_tools.DuckDuckGoSearchRun.invoke)
@@ -60,7 +60,7 @@ def test_research_agent_with_openai() -> None:
     llm.verify(Provider.OPENAI)
 
 
-@tenro
+@tenro.simulate
 def test_research_agent_with_anthropic() -> None:
     """Test agent using DuckDuckGo and Wikipedia tools with Anthropic."""
     register(lc_tools.DuckDuckGoSearchRun.invoke)
@@ -86,7 +86,7 @@ def test_research_agent_with_anthropic() -> None:
     llm.verify(Provider.ANTHROPIC)
 
 
-@tenro
+@tenro.simulate
 def test_research_agent_with_gemini() -> None:
     """Test agent using DuckDuckGo and Wikipedia tools with Gemini."""
     register(lc_tools.DuckDuckGoSearchRun.invoke)

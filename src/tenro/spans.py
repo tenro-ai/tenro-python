@@ -36,8 +36,8 @@ class SpanContext(PydanticBaseModel):
     Attributes:
         trace_id: 32 lowercase hex chars (16 bytes), non-zero.
         span_id: 16 lowercase hex chars (8 bytes), non-zero.
-        trace_flags: 2 lowercase hex chars (1 byte). Stored as hex wire
-            format, not OTel's internal ``TraceFlags(int)`` representation.
+        trace_flags: 2 lowercase hex chars (1 byte). Stored as the hex wire
+            format string, not the numeric ``TraceFlags(int)`` representation.
         trace_state: Raw W3C tracestate header string, or None. Stored as
             the unparsed header value, not a structured key-value type.
         is_remote: True when this context was extracted from propagation.
@@ -60,7 +60,8 @@ class SpanContext(PydanticBaseModel):
 class SpanLink(PydanticBaseModel):
     """Link to another span's context.
 
-    Used for retries, fan-out, and async handoffs per OTel spec.
+    Used for retries, fan-out, and async handoffs. Compatible with
+    OpenTelemetry span-link semantics.
 
     Note: ``attributes`` is only shallow-frozen — Pydantic's ``frozen=True``
     prevents reassigning the field, but the dict itself remains mutable.
@@ -87,17 +88,18 @@ class BaseSpan(BaseModel):
         trace_id: Trace identifier (32 hex chars).
         start_time: Unix nanoseconds (from ``time.time_ns()``) when the span started.
         parent_span_id: Immediate parent span ID (Agent, LLM, or Tool).
-        agent_id: Closest agent ancestor span ID, if any.
+        agent_span_id: Closest agent ancestor span ID, if any.
         error: Error message if the span failed.
         span_type: Discriminator for span subclass.
-        kind: OTel SpanKind.
-        name: OTel span name.
+        kind: Span kind. Mirrors OpenTelemetry ``SpanKind`` semantics.
+        name: Span name.
         end_time: Unix nanoseconds when the span ended, or None if in-flight.
-        status_code: OTel status code.
-        status_message: OTel status message.
-        attributes: OTel-style attributes dict.
-        trace_flags: W3C trace flags as hex wire format (2 chars). Stored
-            as string, not OTel's internal ``TraceFlags(int)``.
+        status_code: Status code (``unset``, ``error``, or ``ok``).
+        status_message: Human-readable status message, if any.
+        attributes: Attribute map. Supports standard OpenTelemetry and
+            GenAI semantic-convention keys.
+        trace_flags: W3C trace flags as the hex wire format (2 chars). Stored
+            as a string, not the numeric ``TraceFlags(int)`` representation.
         trace_state: Raw W3C tracestate header string, unparsed.
         parent_is_remote: Derived convenience flag set by LifecycleManager
             when the parent was extracted from trace propagation. The
@@ -110,7 +112,7 @@ class BaseSpan(BaseModel):
     start_time: int
 
     parent_span_id: str | None = None
-    agent_id: str | None = None
+    agent_span_id: str | None = None
     error: str | None = None
 
     span_type: SpanType
@@ -131,7 +133,7 @@ class BaseSpan(BaseModel):
     _validate_trace_flags = field_validator("trace_flags")(_validate_trace_flags)
     _validate_trace_state = field_validator("trace_state")(_validate_trace_state)
     _validate_parent_span_id = field_validator("parent_span_id")(_validate_optional_span_id)
-    _validate_agent_id = field_validator("agent_id")(_validate_optional_span_id)
+    _validate_agent_span_id = field_validator("agent_span_id")(_validate_optional_span_id)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -259,7 +261,7 @@ class AgentRunSpan(BaseSpan):
     spans for LLM calls and tool calls.
 
     The `span_id` field is a unique span identifier for this specific run.
-    The `agent_id` field equals `span_id` (an agent belongs to itself).
+    The `agent_span_id` field equals `span_id` (an agent belongs to itself).
 
     Used for:
     - Multi-agent hierarchies (Manager -> Researcher -> Writer)
@@ -270,6 +272,9 @@ class AgentRunSpan(BaseSpan):
         target_path: Fully qualified path for verification matching
             (e.g., "mymod.MyAgent.run"). Used by verify_agent() to match spans.
         display_name: Human-readable agent name (for display/trace output).
+        agent_id: Stable agent identifier that survives renames.
+            Falls back to display_name, then target_path when not set.
+        version: Agent version string for deploy/config regression tracking.
         parent_agent_id: Parent agent span identifier, if any.
         invoked_by_tool_call_id: ID of the ToolCallSpan that spawned this agent,
             if any.
@@ -281,6 +286,8 @@ class AgentRunSpan(BaseSpan):
 
     target_path: str
     display_name: str | None = None
+    agent_id: str | None = None
+    version: str | None = None
     parent_agent_id: str | None = None
     invoked_by_tool_call_id: str | None = None
     spans: list[BaseSpan] = Field(default_factory=list)
@@ -289,10 +296,10 @@ class AgentRunSpan(BaseSpan):
     kwargs: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _default_agent_id(self) -> Self:
-        """An agent belongs to itself: agent_id defaults to span_id."""
-        if self.agent_id is None:
-            self.agent_id = self.span_id
+    def _default_agent_span_id(self) -> Self:
+        """An agent belongs to itself: agent_span_id defaults to span_id."""
+        if self.agent_span_id is None:
+            self.agent_span_id = self.span_id
         return self
 
     def get_llm_calls(self, recursive: bool = True) -> list[LLMCallSpan]:

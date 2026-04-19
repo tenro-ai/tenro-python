@@ -16,55 +16,20 @@ import httpx
 import respx
 
 from tenro._construct.http.builders.factory import ProviderSchemaFactory
+from tenro._construct.http.provider_endpoints import (
+    domain_to_provider,
+    get_blocked_domains,
+    get_provider_endpoints,
+    get_supported_providers,
+    provider_to_domain,
+)
+from tenro._construct.http.request_parser import is_streaming_request, parse_request_body
+from tenro._construct.http.streaming import build_stream_response
 from tenro._core.context import get_current_agent_name
-from tenro.providers import Provider
 
 if TYPE_CHECKING:
     from tenro._construct.simulate.orchestrator import SimulatedResponse
 
-# Provider API endpoints
-PROVIDER_ENDPOINTS: dict[str, str] = {
-    "anthropic": "https://api.anthropic.com/v1/messages",
-    "openai": "https://api.openai.com/v1/chat/completions",
-    "gemini": "https://generativelanguage.googleapis.com/",  # Prefix for pattern match
-}
-
-
-def get_provider_endpoints() -> dict[str, str]:
-    """Get provider endpoints, including dynamically registered providers.
-
-    Returns:
-        Dict mapping provider names to their endpoint URLs.
-    """
-    from tenro._construct.http.registry import ProviderRegistry
-
-    endpoints = dict(PROVIDER_ENDPOINTS)
-    for name in ProviderRegistry.list_providers():
-        if name not in endpoints:
-            try:
-                config = ProviderRegistry.get_provider(name)
-                endpoint = ProviderRegistry.get_endpoint(name)
-                endpoints[name] = f"{config.base_url}{endpoint.http_path}"
-            except Exception:
-                pass
-    return endpoints
-
-
-def get_supported_providers() -> set[str]:
-    """Get set of providers that support HTTP interception.
-
-    Returns:
-        Set of provider names, including dynamically registered providers.
-    """
-    return set(get_provider_endpoints().keys())
-
-
-# Default LLM domains to block when no simulation matches
-DEFAULT_BLOCKED_LLM_DOMAINS: list[str] = [
-    "api.openai.com",
-    "api.anthropic.com",
-    "generativelanguage.googleapis.com",
-]
 
 # Type for call capture callback:
 #   (provider, messages, model, response_text, agent, tool_calls) -> None
@@ -103,11 +68,11 @@ class HttpInterceptor:
                 outside of an agent context. `tool_calls` is a list of tool call
                 dicts the LLM emitted.
             blocked_llm_domains: Domains to block when no simulation matches.
-                If None, uses DEFAULT_BLOCKED_LLM_DOMAINS. Pass empty list to
+                If None, blocks all known provider domains. Pass empty list to
                 disable blocking.
         """
         self._blocked_domains = (
-            blocked_llm_domains if blocked_llm_domains is not None else DEFAULT_BLOCKED_LLM_DOMAINS
+            blocked_llm_domains if blocked_llm_domains is not None else get_blocked_domains()
         )
         # Always use assert_all_mocked=False to allow non-blocked requests to pass through.
         # The unified handler explicitly raises UnexpectedLLMCallError for blocked LLM domains
@@ -142,56 +107,21 @@ class HttpInterceptor:
             ValueError: If provider endpoint is not configured.
         """
         endpoints = get_provider_endpoints()
-        endpoint = endpoints.get(provider)
-        if not endpoint:
+        if not endpoints.get(provider):
             raise ValueError(
                 f"Unknown provider '{provider}'. Available: {', '.join(endpoints.keys())}"
             )
-
-        format_provider = adapter or provider
-
         if provider in self._response_queue:
             raise ValueError(
                 f"Provider '{provider}' already simulated. "
                 "Use a single simulate_llm() call for all responses"
             )
 
-        response_tuples: list[
-            tuple[dict[str, Any] | Exception, str | None, list[dict[str, Any]]]
-        ] = []
-        for item in items:
-            if isinstance(item.content, Exception):
-                response_tuples.append((item.content, None, []))
-            elif item.raw_payload is not None:
-                # RawLLMResponse: use payload directly without interpretation
-                response_tuples.append((item.raw_payload, None, []))
-            else:
-                # Extract text and tool_calls from blocks for logging/callbacks
-                blocks = item.blocks or []
-                text_parts = [b for b in blocks if isinstance(b, str)]
-                response_text = "".join(text_parts) if text_parts else ""
-
-                tool_call_dicts: list[dict[str, Any]] = []
-                for b in blocks:
-                    if hasattr(b, "name") and hasattr(b, "arguments"):
-                        tool_call_dicts.append(
-                            {
-                                "id": getattr(b, "call_id", None),
-                                "name": b.name,
-                                "arguments": b.arguments,
-                            }
-                        )
-
-                resp_kwargs = dict(kwargs)
-                response = ProviderSchemaFactory.create_response_from_blocks(
-                    format_provider, blocks, **resp_kwargs
-                )
-                json_response = dict(response)
-                response_tuples.append((json_response, response_text, tool_call_dicts))
-
+        format_provider = adapter or provider
+        response_tuples = [_item_to_response_tuple(item, format_provider, kwargs) for item in items]
         self._response_queue[provider] = iter(response_tuples)
 
-        domain = self._provider_to_domain(provider)
+        domain = provider_to_domain(provider)
         if domain and domain not in self._blocked_domains:
             self._respx_router.route(host=domain).mock(
                 side_effect=lambda req, d=domain: self._unified_handler(req, d)
@@ -233,7 +163,7 @@ class HttpInterceptor:
         # Parse request body for callback (must run before exception to mark triggered)
         if self._on_call is not None:
             try:
-                messages, model = self._parse_request(request, provider)
+                messages, model = parse_request_body(request, provider)
                 agent_name = get_current_agent_name()
                 # For exceptions, response_text is None but callback is still notified
                 self._on_call(
@@ -246,35 +176,10 @@ class HttpInterceptor:
         if isinstance(response_item, Exception):
             raise response_item
 
+        if is_streaming_request(request, provider):
+            return build_stream_response(provider, response_text or "", response_item, tool_calls)
+
         return httpx.Response(200, json=response_item)
-
-    def _parse_request(
-        self, request: httpx.Request, provider: str
-    ) -> tuple[list[dict[str, Any]], str | None]:
-        """Parse request body to extract messages and model."""
-        import json
-        import re
-
-        try:
-            body = json.loads(request.content)
-        except (json.JSONDecodeError, TypeError):
-            return [], None
-
-        # Ensure body is a dict (JSON could be list, str, etc.)
-        if not isinstance(body, dict):
-            return [], None
-
-        # Anthropic/OpenAI use "messages", Gemini uses "contents"
-        messages = body.get("messages") or body.get("contents", [])
-        model = body.get("model")
-
-        # Gemini: model is in URL path, not body (e.g., /v1beta/models/gemini-pro:generateContent)
-        if model is None and provider == Provider.GEMINI:
-            match = re.search(r"/models/([^/:]+)", request.url.path)
-            if match:
-                model = match.group(1)
-
-        return messages, model
 
     def _add_unified_handler_routes(self) -> None:
         """Add unified handler routes for all blocked LLM domains.
@@ -305,30 +210,13 @@ class HttpInterceptor:
             all requests to `api.openai.com`, including non-chat endpoints like
             embeddings. This is a known limitation.
         """
-        provider = self._domain_to_provider(domain)
+        provider = domain_to_provider(domain)
         if provider and provider in self._response_queue:
             return self._handle_request(request, provider)
 
         from tenro.errors import TenroUnexpectedLLMCallError
 
         raise TenroUnexpectedLLMCallError(domain, str(request.url))
-
-    def _domain_to_provider(self, domain: str) -> str | None:
-        """Map domain to provider name by extracting from provider endpoints."""
-        for provider, endpoint in get_provider_endpoints().items():
-            if domain in endpoint:
-                return provider
-        return None
-
-    def _provider_to_domain(self, provider: str) -> str | None:
-        """Map provider name to domain by extracting from provider endpoints."""
-        endpoints = get_provider_endpoints()
-        endpoint = endpoints.get(provider)
-        if not endpoint:
-            return None
-        from urllib.parse import urlparse
-
-        return urlparse(endpoint).netloc
 
     def start(self) -> None:
         """Start intercepting HTTP requests.
@@ -360,3 +248,40 @@ class HttpInterceptor:
     ) -> None:
         """Context manager exit - stop intercepting."""
         self.stop()
+
+
+def _item_to_response_tuple(
+    item: SimulatedResponse,
+    format_provider: str,
+    kwargs: dict[str, Any],
+) -> tuple[dict[str, Any] | Exception, str | None, list[dict[str, Any]]]:
+    """Convert a SimulatedResponse into the interceptor's queue tuple.
+
+    Exceptions pass through unchanged. Raw payloads are used verbatim.
+    Block lists are flattened into text (for callbacks) and tool-call
+    dicts (for downstream wire serialization).
+    """
+    if isinstance(item.content, Exception):
+        return item.content, None, []
+    if item.raw_payload is not None:
+        return item.raw_payload, None, []
+
+    blocks = item.blocks or []
+    text_parts = [b for b in blocks if isinstance(b, str)]
+    response_text = "".join(text_parts) if text_parts else ""
+    tool_call_dicts = [
+        {"id": getattr(b, "call_id", None), "name": b.name, "arguments": b.arguments}
+        for b in blocks
+        if hasattr(b, "name") and hasattr(b, "arguments")
+    ]
+    response = ProviderSchemaFactory.create_response_from_blocks(
+        format_provider, blocks, **dict(kwargs)
+    )
+    return dict(response), response_text, tool_call_dicts
+
+
+__all__ = [
+    "HttpInterceptor",
+    "get_provider_endpoints",
+    "get_supported_providers",
+]

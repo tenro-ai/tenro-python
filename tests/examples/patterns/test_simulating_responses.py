@@ -15,12 +15,12 @@ from examples.myapp import (
     search_documents,
 )
 
+import tenro
 from tenro import Provider
 from tenro.simulate import llm, tool
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_single_tool_result() -> None:
     """Return the same value every time the tool is called."""
     # Control tool output - same result on every call
@@ -32,7 +32,7 @@ def test_single_tool_result() -> None:
     tool.verify_many(search_documents, count=1)
 
 
-@tenro
+@tenro.simulate
 def test_sequential_tool_results() -> None:
     """Return different values on each successive call."""
     # First call returns empty, second returns results (simulate retry logic)
@@ -49,7 +49,7 @@ def test_sequential_tool_results() -> None:
     tool.verify_many(search_documents, count=2)
 
 
-@tenro
+@tenro.simulate
 def test_single_llm_response() -> None:
     """Control what the LLM returns."""
     # Every OpenAI call returns this response
@@ -61,7 +61,7 @@ def test_single_llm_response() -> None:
     llm.verify(Provider.OPENAI, output_contains="discusses")
 
 
-@tenro
+@tenro.simulate
 def test_sequential_llm_responses() -> None:
     """Different responses for multi-turn conversations."""
     # Simulate a back-and-forth conversation

@@ -12,6 +12,7 @@ from tenro._otel.constants import (
     _GENERATE_CONTENT_PROVIDERS,
     ATTR_AGENT_ID,
     ATTR_AGENT_NAME,
+    ATTR_AGENT_VERSION,
     ATTR_ERROR_TYPE,
     ATTR_EVAL_EXPLANATION,
     ATTR_EVAL_NAME,
@@ -25,6 +26,7 @@ from tenro._otel.constants import (
     ATTR_RESPONSE_FINISH_REASONS,
     ATTR_RESPONSE_ID,
     ATTR_RESPONSE_MODEL,
+    ATTR_SIMULATED,
     ATTR_TOOL_CALL_ID,
     ATTR_TOOL_NAME,
     EVENT_EVALUATION_RESULT,
@@ -69,14 +71,17 @@ def map_span_end(span: BaseSpan) -> dict[str, Any]:
     Raises:
         TypeError: If span is not a recognized subclass.
     """
+    attrs: dict[str, Any]
     if isinstance(span, LLMCall):
-        return _map_llm_end(span)
-    if isinstance(span, (ToolCall, AgentRun)):
-        attrs: dict[str, Any] = {}
+        attrs = _map_llm_end(span)
+    elif isinstance(span, (ToolCall, AgentRun)):
+        attrs = {}
         if span.status_code == "error" and span.error:
             attrs[ATTR_ERROR_TYPE] = span.error
-        return attrs
-    raise TypeError(f"Unsupported span type: {type(span).__name__}")
+    else:
+        raise TypeError(f"Unsupported span type: {type(span).__name__}")
+    attrs[ATTR_SIMULATED] = span.simulated
+    return attrs
 
 
 def get_otel_span_name(span: BaseSpan) -> str:
@@ -221,10 +226,13 @@ def _map_tool_start(span: ToolCall) -> dict[str, Any]:
 
 def _map_agent_start(span: AgentRun) -> dict[str, Any]:
     """Map AgentRun start attributes."""
+    resolved_id = span.agent_id or span.display_name or span.target_path
     attrs: dict[str, Any] = {
         ATTR_OPERATION_NAME: OP_INVOKE_AGENT,
-        ATTR_AGENT_ID: span.span_id,
+        ATTR_AGENT_ID: resolved_id,
     }
     if span.display_name is not None:
         attrs[ATTR_AGENT_NAME] = span.display_name
+    if span.version is not None:
+        attrs[ATTR_AGENT_VERSION] = span.version
     return attrs

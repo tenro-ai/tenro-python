@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from examples.myapp import CustomerSupportAgent, generate_response, search_knowledge_base
 
+import tenro
 from tenro import Provider
 from tenro.simulate import llm, tool
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_customer_support_answers_question() -> None:
     """Test customer support agent uses knowledge base and LLM."""
     tool.simulate(

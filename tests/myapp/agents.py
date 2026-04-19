@@ -24,7 +24,7 @@ def fetch(url: str) -> str:
     raise NotImplementedError("Should be simulated")
 
 
-@link_agent
+@link_agent(name="researcher", id="agt_researcher", version="1.0.0")
 class Researcher:
     """Research agent that finds information."""
 
@@ -33,7 +33,7 @@ class Researcher:
         raise NotImplementedError("Should be simulated")
 
 
-@link_agent
+@link_agent(name="writer", id="agt_writer", version="1.0.0")
 class Writer:
     """Writer agent that generates content."""
 

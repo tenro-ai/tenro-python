@@ -1,21 +1,20 @@
 # Copyright 2026 Tenro.ai
 # SPDX-License-Identifier: Apache-2.0
 
-"""PatchEngine for module-level patching at import time.
+"""PatchEngine for module-level patching at install time.
 
-Manages sys.modules patching and sys.meta_path import hooks
-for third-party module instrumentation during test execution.
+Patches already-imported target modules in ``sys.modules`` when
+``install()`` runs. Patchers currently only mark modules with a sentinel
+attribute; real simulation uses transport-level seams (respx) and
+``@link_*`` decorators, not import-time interception.
 """
 
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+import threading
 from dataclasses import dataclass, field
-from importlib.abc import MetaPathFinder
-from importlib.machinery import ModuleSpec
 from types import ModuleType
-from typing import Any
 
 # Marker attribute to track patched modules
 _TENRO_PATCHED_MARKER = "_tenro_patched"
@@ -34,10 +33,9 @@ class PatcherStatus:
 
 @dataclass
 class PatchEngineStatus:
-    """Overall patching backend status (single source of truth)."""
+    """Aggregate status for the patching engine and all registered patchers."""
 
     installed: bool = False
-    meta_path_installed: bool = False
     patchers: dict[str, PatcherStatus] = field(default_factory=dict)
 
 
@@ -79,73 +77,56 @@ class ModulePatcher:
         setattr(module, _TENRO_PATCHED_MARKER, True)
 
 
-class _TenroImportHook(MetaPathFinder):
-    """Import hook that patches modules on import.
-
-    Installed in sys.meta_path to catch imports after PatchEngine.install().
-    """
-
-    def __init__(self, patchers: dict[str, ModulePatcher]) -> None:
-        """Initialize with registered patchers.
-
-        Args:
-            patchers: Map of module_name -> patcher.
-        """
-        self._patchers = patchers
-        self._in_find = False  # Avoid infinite loops during find operations
-
-    def find_spec(
-        self,
-        fullname: str,
-        path: Any = None,
-        target: ModuleType | None = None,
-    ) -> ModuleSpec | None:
-        """Find spec hook that observes imports without providing specs.
-
-        Returns None to let the normal import machinery handle the import,
-        then patches in the post-import phase via a different mechanism.
-        """
-        return None
-
-    def patch_if_needed(self, module: ModuleType, fullname: str) -> None:
-        """Patch module if a patcher is registered for it.
-
-        Called after module is imported.
-
-        Args:
-            module: The imported module.
-            fullname: Full module name.
-        """
-        root = fullname.split(".")[0]
-        patcher = self._patchers.get(root)
-        if patcher and not patcher.is_patched(module):
-            patcher.patch(module)
-            patcher.mark_patched(module)
-
-
 class PatchEngine:
-    """Engine for module-level patching at import time.
+    """Engine for module-level patching at install time.
 
-    Manages registration of module patchers and installation of import hooks
-    for third-party module instrumentation during test execution.
+    Manages registration of module patchers and patches already-imported
+    target modules when ``install()`` runs.
     """
 
     def __init__(self) -> None:
         """Initialize the patch engine."""
         self._patchers: dict[str, ModulePatcher] = {}
-        self._import_hook: _TenroImportHook | None = None
         self._status = PatchEngineStatus()
-        self._original_import: Callable[..., Any] | None = None
+        # Thread id of the thread currently running install(), or None.
+        # Guarded by ``_state_lock``. The lock is only held for short
+        # state-machine transitions (enter/exit install, register, uninstall);
+        # install steps themselves run without the lock so that patcher code
+        # cannot deadlock against waiters.
+        self._installing_thread: int | None = None
+        self._state_lock = threading.Lock()
+        # Snapshot of patchers captured at the start of each install(), used
+        # by verify() so it isn't affected by _patchers mutations that happen
+        # during patch() callbacks.
+        self._install_snapshot: dict[str, ModulePatcher] = {}
 
     def register(self, patcher: ModulePatcher) -> None:
         """Register a module patcher.
 
+        Must be called before ``install()``; post-install registration raises
+        because the new patcher would silently miss both already-imported
+        modules and any future imports.
+
         Args:
             patcher: The patcher to register.
+
+        Raises:
+            ValueError: If patcher has no ``module_name``.
+            RuntimeError: If called after ``install()``.
         """
         if not patcher.module_name:
             raise ValueError("Patcher must have module_name set")
-        self._patchers[patcher.module_name] = patcher
+        # The state lock is never held while patcher code runs, so this
+        # cannot deadlock against a patcher synchronously waiting on the
+        # caller (e.g. via Thread.join()).
+        with self._state_lock:
+            if self._status.installed or self._installing_thread is not None:
+                raise RuntimeError(
+                    f"Cannot register patcher for {patcher.module_name!r} "
+                    "after install(); register all patchers before installing "
+                    "the engine."
+                )
+            self._patchers[patcher.module_name] = patcher
 
     @property
     def targets(self) -> list[str]:
@@ -154,13 +135,13 @@ class PatchEngine:
 
     @property
     def status(self) -> PatchEngineStatus:
-        """Get the current status (single source of truth)."""
+        """Get the aggregate status of the engine and its patchers."""
         return self._status
 
     def install(self, strict: bool = False) -> None:
         """Install the patch engine.
 
-        Patches already-imported modules and installs import hook for future imports.
+        Patches already-imported target modules and records per-patcher status.
         Populates PatchEngineStatus with results.
 
         Args:
@@ -171,111 +152,126 @@ class PatchEngine:
             TenroPatchingSetupError: If strict=True and modules were already imported,
                 or if patch markers fail to attach (always).
         """
-        if self._status.installed:
-            return
+        # Short-held state lock: check preconditions and claim ownership
+        # atomically, then release the lock before running install steps.
+        # Holding the lock across patcher code would deadlock if a patcher
+        # synchronously waits on a thread that calls register/uninstall.
+        tid = threading.get_ident()
+        with self._state_lock:
+            if self._installing_thread == tid:
+                raise RuntimeError(
+                    "install() called reentrantly; a patcher's patch() must "
+                    "not trigger engine.install()."
+                )
+            if self._installing_thread is not None:
+                raise RuntimeError(
+                    "install() is already running on another thread; callers "
+                    "must serialize install() externally."
+                )
+            if self._status.installed:
+                return
+            self._installing_thread = tid
 
-        # First pass: patch already-imported modules, populate patcher status
-        for module_name, patcher in self._patchers.items():
-            is_late = module_name in sys.modules
+        try:
+            self._patch_imported_modules()
+            self.verify()
+            self._handle_late_modules(strict=strict)
+            # Only mark installed after all steps succeed, so a failed verify()
+            # or strict late-module error leaves the engine re-runnable and still
+            # accepting new registrations.
+            with self._state_lock:
+                self._status.installed = True
+        finally:
+            with self._state_lock:
+                self._installing_thread = None
+
+    def _patch_imported_modules(self) -> None:
+        """Patch already-imported modules and record per-patcher status.
+
+        Builds the status map in a local dict so concurrent readers of
+        ``self._status.patchers`` never observe a partially populated map
+        (which would raise "dictionary changed size during iteration").
+        The snapshot is installed atomically under the state lock once all
+        patching is done.
+        """
+        # Snapshot the registry: patcher.patch() runs arbitrary callbacks
+        # that could mutate _patchers via private access.
+        snapshot = list(self._patchers.items())
+        new_status: dict[str, PatcherStatus] = {}
+        for module_name, patcher in snapshot:
+            module = sys.modules.get(module_name)
+            is_late = module is not None
             patcher_status = PatcherStatus(module=module_name, late=is_late)
 
-            if is_late:
-                module = sys.modules[module_name]
+            if module is not None:
                 if not patcher.is_patched(module):
                     patcher.patch(module)
                     patcher.mark_patched(module)
-                # Track what was patched (marker attribute on module)
                 patcher_status.patched = [_TENRO_PATCHED_MARKER]
 
-            self._status.patchers[module_name] = patcher_status
+            new_status[module_name] = patcher_status
 
-        # Install import hook for future imports
-        self._import_hook = _TenroImportHook(self._patchers)
-        sys.meta_path.insert(0, self._import_hook)
-        self._status.meta_path_installed = True
+        # Publish the snapshot and status map atomically: verify() pairs
+        # them to decide success, and must never observe a mix of old
+        # status with a new snapshot (or vice versa).
+        new_snapshot = dict(snapshot)
+        with self._state_lock:
+            self._install_snapshot = new_snapshot
+            self._status.patchers = new_status
 
-        # Install post-import hook to patch modules after loading
-        self._install_import_wrapper()
+    def _handle_late_modules(self, strict: bool) -> None:
+        """Warn (always) and optionally raise for modules imported pre-install."""
+        late = self.late_modules
+        if not late:
+            return
 
-        self._status.installed = True
+        import warnings
 
-        # Verify patches attached (always fail if markers missing - real misconfig)
-        self.verify()
+        from tenro.errors.base import TenroLateImportWarning, TenroPatchingSetupError
 
-        # Collect late modules from status
-        late_modules = [name for name, ps in self._status.patchers.items() if ps.late]
+        warnings.warn(
+            f"Tenro loaded late: {late} were imported before Tenro. "
+            "Tenro patched them best-effort, but code that already "
+            "captured references to those modules (e.g. `from openai import OpenAI` "
+            "at module scope) may bypass patching. "
+            "Fix: ensure Tenro loads first (pytest plugin/early import). "
+            "Safe to ignore if you only use @link_tool/@link_agent decorators, "
+            "tenro.register(), or tenro.simulate.llm/tool/agent() — these paths "
+            "do not depend on import-time patching.",
+            TenroLateImportWarning,
+            stacklevel=3,
+        )
 
-        # Warn on late modules (always, even in non-strict mode)
-        if late_modules:
-            import warnings
-
-            from tenro.errors.base import TenroLateImportWarning
-
-            warnings.warn(
-                f"Tenro loaded late: {late_modules} were imported before Tenro. "
-                "Tenro patched them best-effort, but some previously-captured "
-                "references may bypass patching. "
-                "Fix: ensure Tenro loads first (pytest plugin/early import). "
-                "Ignore if using @link_*, tenro.register(), or LLM provider simulation.",
-                TenroLateImportWarning,
-                stacklevel=2,
-            )
-
-        # Only raise if strict explicitly enabled
-        if late_modules and strict:
-            from tenro.errors.base import TenroPatchingSetupError
-
-            raise TenroPatchingSetupError(late_modules=late_modules)
-
-    def _install_import_wrapper(self) -> None:
-        """Wrap builtins.__import__ to patch modules post-import."""
-        import builtins
-
-        original_import = builtins.__import__
-        self._original_import = original_import
-        patchers = self._patchers
-
-        def patching_import(
-            name: str,
-            globals: Any = None,
-            locals: Any = None,
-            fromlist: Any = (),
-            level: int = 0,
-        ) -> ModuleType:
-            module = original_import(name, globals, locals, fromlist, level)
-
-            # Patch if needed
-            root = name.split(".")[0]
-            patcher = patchers.get(root)
-            if patcher and not patcher.is_patched(module):
-                patcher.patch(module)
-                patcher.mark_patched(module)
-
-            return module
-
-        builtins.__import__ = patching_import
+        if strict:
+            raise TenroPatchingSetupError(late_modules=late)
 
     def uninstall(self) -> None:
         """Uninstall the patch engine.
 
-        Removes import hook and restores original __import__.
-        Does NOT unpatch already-patched modules (remain instrumented).
+        Flips the installed flag. Does NOT unpatch already-patched modules.
+        Raises if an install() is in flight on another thread rather than
+        blocking, since the installing thread may be synchronously waiting
+        on the caller.
+
+        Raises:
+            RuntimeError: If called while install() is running.
         """
-        if not self._status.installed:
-            return
-
-        # Remove import hook
-        if self._import_hook and self._import_hook in sys.meta_path:
-            sys.meta_path.remove(self._import_hook)
-            self._status.meta_path_installed = False
-
-        # Restore original __import__
-        if self._original_import:
-            import builtins
-
-            builtins.__import__ = self._original_import
-
-        self._status.installed = False
+        tid = threading.get_ident()
+        with self._state_lock:
+            owner = self._installing_thread
+            if owner is not None:
+                if owner == tid:
+                    raise RuntimeError(
+                        "uninstall() called reentrantly from install(); "
+                        "a patcher's patch() must not trigger uninstall()."
+                    )
+                raise RuntimeError(
+                    "uninstall() called while install() is running on another "
+                    "thread; callers must serialize lifecycle calls externally."
+                )
+            if not self._status.installed:
+                return
+            self._status.installed = False
 
     def verify(self) -> None:
         """Verify that patches were successfully applied.
@@ -286,19 +282,36 @@ class PatchEngine:
         Raises:
             TenroPatchingSetupError: If patch markers are missing.
         """
+        # Snapshot status map and install snapshot together so a concurrent
+        # install() cannot interleave "old status + new snapshot" and cause
+        # spurious failures. Only verify() needs this pairing; per-status
+        # mutations below operate on live status objects (still safe because
+        # PatcherStatus identity is preserved through publication).
+        with self._state_lock:
+            status_items = list(self._status.patchers.items())
+            snapshot = dict(self._install_snapshot)
+
         missing_markers: list[str] = []
 
-        for module_name, patcher_status in self._status.patchers.items():
+        for module_name, patcher_status in status_items:
             if not patcher_status.late:
                 continue  # Only verify late-patched modules
 
-            if module_name in sys.modules:
-                module = sys.modules[module_name]
-                patcher = self._patchers.get(module_name)
-                if patcher and not patcher.is_patched(module):
-                    patcher_status.markers_ok = False
-                    patcher_status.missing = [_TENRO_PATCHED_MARKER]
-                    missing_markers.append(module_name)
+            # Defer to the registered patcher's ``is_patched()`` to respect
+            # subclasses with a custom marker; fall back to the sentinel if
+            # the snapshot entry is missing (patcher removed itself).
+            module = sys.modules.get(module_name)
+            if module is None:
+                continue
+            patcher = snapshot.get(module_name)
+            if patcher is not None:
+                marker_ok = patcher.is_patched(module)
+            else:
+                marker_ok = bool(getattr(module, _TENRO_PATCHED_MARKER, False))
+            if not marker_ok:
+                patcher_status.markers_ok = False
+                patcher_status.missing = [_TENRO_PATCHED_MARKER]
+                missing_markers.append(module_name)
 
         if missing_markers:
             from tenro.errors.base import TenroPatchingSetupError

@@ -1,0 +1,22 @@
+{
+  "content_type": "text/event-stream; charset=utf-8",
+  "events": [
+    {
+      "data": {
+        "candidates": [
+          {
+            "content": {"parts": [{"text": "{{content}}"}], "role": "model"},
+            "finishReason": "STOP",
+            "index": 0
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": "{{usage_input_tokens}}",
+          "candidatesTokenCount": "{{usage_output_tokens}}",
+          "totalTokenCount": "{{usage_total_tokens}}"
+        },
+        "modelVersion": "{{model}}"
+      }
+    }
+  ]
+}

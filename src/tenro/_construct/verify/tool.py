@@ -24,6 +24,11 @@ from tenro._construct.verify.output import (
     verify_output_contains,
     verify_output_exact,
 )
+from tenro._construct.verify.trajectory import (
+    verify_tool_before,
+    verify_tool_subsequence,
+    verify_tools_called,
+)
 
 if TYPE_CHECKING:
     from tenro._core.spans import AgentRun, ToolCall
@@ -76,25 +81,11 @@ class ToolVerifications:
             >>> construct.verify_tool(api, output_exact={"a": 1, "b": 2})  # strict
         """
         targets = (target,) if isinstance(target, str) else target
-
         matching_calls = [c for c in self._tool_calls if c.target_path in targets]
 
-        # Output verification (takes precedence)
-        if output is not None:
-            verify_output(matching_calls, "result", output, "tool", call_index=call_index)
-            return
-        if output_contains is not None:
-            verify_output_contains(
-                matching_calls, "result", output_contains, "tool", call_index=call_index
-            )
-            return
-        if output_exact is not None:
-            verify_output_exact(
-                matching_calls, "result", output_exact, "tool", call_index=call_index
-            )
+        if self._check_output(matching_calls, output, output_contains, output_exact, call_index):
             return
 
-        # Input/count verification
         if not args_dict and not kwargs:
             verify_call_count(
                 calls=self._tool_calls,
@@ -116,6 +107,26 @@ class ToolVerifications:
                 event_type="tool",
                 kwargs=kwargs,
             )
+
+    @staticmethod
+    def _check_output(
+        calls: list[Any],
+        output: Any,
+        output_contains: str | None,
+        output_exact: Any,
+        call_index: int | None,
+    ) -> bool:
+        """Check output assertions. Returns True if any output check was performed."""
+        if output is not None:
+            verify_output(calls, "result", output, "tool", call_index=call_index)
+            return True
+        if output_contains is not None:
+            verify_output_contains(calls, "result", output_contains, "tool", call_index=call_index)
+            return True
+        if output_exact is not None:
+            verify_output_exact(calls, "result", output_exact, "tool", call_index=call_index)
+            return True
+        return False
 
     def verify_tool_never(self, target: str | tuple[str, ...]) -> None:
         """Verify tool was never called.
@@ -157,6 +168,62 @@ class ToolVerifications:
             expected_sequence=expected_sequence,
             event_type="tool",
         )
+
+    def verify_tool_subsequence(self, expected: list[str]) -> None:
+        """Verify tools appeared in order, not necessarily consecutive.
+
+        Other tools can appear between them. Extras allowed.
+
+        Args:
+            expected: Expected subsequence of tool names.
+
+        Raises:
+            TenroVerificationError: If subsequence not found.
+
+        Examples:
+            >>> construct.verify_tool_subsequence(["search", "summarize"])
+        """
+        verify_tool_subsequence(
+            calls=self._tool_calls,
+            expected=expected,
+            event_type="tool",
+        )
+
+    def verify_tool_before(self, earlier: str, later: str) -> None:
+        """Verify earlier tool was called before later tool.
+
+        Uses existential semantics: passes if any occurrence of earlier
+        appears before any later occurrence of later.
+
+        Args:
+            earlier: Tool that should appear first.
+            later: Tool that should appear after.
+
+        Raises:
+            TenroVerificationError: If ordering not found.
+
+        Examples:
+            >>> construct.verify_tool_before("search", "summarize")
+        """
+        verify_tool_before(
+            calls=self._tool_calls,
+            earlier=earlier,
+            later=later,
+            event_type="tool",
+        )
+
+    def verify_tools_called(self, names: set[str] | list[str]) -> None:
+        """Verify all named tools were called at least once, any order.
+
+        Extras allowed. Presence = at least once.
+
+        Args:
+            names: Tool names that must all be present.
+
+        Examples:
+            >>> construct.verify_tools_called({"search", "summarize"})
+        """
+        verify_tools_called(calls=self._tool_calls, names=names, event_type="tool")
 
     def verify_tools(
         self,

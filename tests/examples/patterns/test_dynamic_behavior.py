@@ -11,12 +11,12 @@ from __future__ import annotations
 
 from examples.myapp import WeatherAgent, get_weather
 
+import tenro
 from tenro import Provider, ToolCall
 from tenro.simulate import llm, tool
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_input_dependent_responses() -> None:
     """Responses vary based on input arguments using side_effect."""
 
@@ -44,7 +44,7 @@ def test_input_dependent_responses() -> None:
     llm.verify_many(Provider.OPENAI, count=2)
 
 
-@tenro
+@tenro.simulate
 def test_side_effect_with_state() -> None:
     """Side effect can maintain state across multiple tool calls."""
     call_count = {"n": 0}

@@ -8,12 +8,12 @@ from __future__ import annotations
 from examples.experimental.pydantic_ai.myapp.agents import CustomerSupportAgent
 from examples.myapp import search_knowledge_base
 
+import tenro
 from tenro import Provider, ToolCall
 from tenro.simulate import agent, llm, tool
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_customer_support_answers_question() -> None:
     """Test customer support agent uses knowledge base and LLM."""
     tool.simulate(

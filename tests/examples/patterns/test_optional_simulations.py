@@ -15,11 +15,11 @@ from examples.myapp import (
     get_data_with_cache,
 )
 
+import tenro
 from tenro.simulate import tool
-from tenro.testing import tenro
 
 
-@tenro
+@tenro.simulate
 def test_cache_hit_skips_api() -> None:
     """When cache returns data, API is not called."""
     tool.simulate(check_cache, result={"data": "cached"})
@@ -32,7 +32,7 @@ def test_cache_hit_skips_api() -> None:
     tool.verify_never(fetch_from_api)
 
 
-@tenro
+@tenro.simulate
 def test_cache_miss_calls_api() -> None:
     """When cache returns None, API is called."""
     tool.simulate(check_cache, result=None)
@@ -45,7 +45,7 @@ def test_cache_miss_calls_api() -> None:
     tool.verify_many(fetch_from_api, count=1)
 
 
-@tenro
+@tenro.simulate
 def test_cache_bypass_skips_check() -> None:
     """When cache is disabled, cache check is skipped."""
     tool.simulate(check_cache, result={"data": "cached"}, optional=True)

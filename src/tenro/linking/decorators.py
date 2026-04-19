@@ -211,6 +211,9 @@ def _wrap_agent_method(
     method: Callable[..., Any],
     agent_name: str,
     method_target_path: str | None = None,
+    *,
+    agent_id: str | None = None,
+    version: str | None = None,
 ) -> Callable[..., Any]:
     """Wrap a method with agent span tracking and re-entrancy guard.
 
@@ -218,6 +221,8 @@ def _wrap_agent_method(
         method: The method to wrap.
         agent_name: Display name for the agent span.
         method_target_path: Fully qualified path for span identity (e.g., "mymod.Cls.run").
+        agent_id: Stable agent identifier that survives renames.
+        version: Agent version string for regression tracking.
     """
     if getattr(method, ATTR_WRAPPED, False):
         return method
@@ -245,7 +250,13 @@ def _wrap_agent_method(
                 return
 
             canonical_key = method_target_path or f"unknown.{agent_name}"
-            span = create_agent_span(canonical_key, agent_name, input_data=args)
+            span = create_agent_span(
+                canonical_key,
+                agent_name,
+                input_data=args,
+                agent_id=agent_id,
+                version=version,
+            )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -292,7 +303,13 @@ def _wrap_agent_method(
                     guard_exit(token)
 
             canonical_key = method_target_path or f"unknown.{agent_name}"
-            span = create_agent_span(canonical_key, agent_name, input_data=args)
+            span = create_agent_span(
+                canonical_key,
+                agent_name,
+                input_data=args,
+                agent_id=agent_id,
+                version=version,
+            )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -339,7 +356,13 @@ def _wrap_agent_method(
                     guard_exit(token)
 
             canonical_key = method_target_path or f"unknown.{agent_name}"
-            span = create_agent_span(canonical_key, agent_name, input_data=args)
+            span = create_agent_span(
+                canonical_key,
+                agent_name,
+                input_data=args,
+                agent_id=agent_id,
+                version=version,
+            )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
 
@@ -374,7 +397,14 @@ def _wrap_agent_method(
                 guard_exit(token)
 
         canonical_key = method_target_path or f"unknown.{agent_name}"
-        span = create_agent_span(canonical_key, agent_name, input_data=args, kwargs=kwargs)
+        span = create_agent_span(
+            canonical_key,
+            agent_name,
+            input_data=args,
+            kwargs=kwargs,
+            agent_id=agent_id,
+            version=version,
+        )
         lifecycle = construct._lifecycle
         parent_span_id = lifecycle.start_span_manual(span)
 
@@ -401,7 +431,13 @@ def _wrap_agent_method(
     return sync_wrapper
 
 
-def _wrap_agent_function(func: F, agent_name: str) -> F:
+def _wrap_agent_function(
+    func: F,
+    agent_name: str,
+    *,
+    agent_id: str | None = None,
+    version: str | None = None,
+) -> F:
     """Wrap a function with agent span tracking and re-entrancy guard."""
     if getattr(func, ATTR_WRAPPED, False):
         return func
@@ -444,7 +480,11 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
                 return
 
             span = create_agent_span(
-                target_path, agent_name, input_data=_strip_self_if_method(args)
+                target_path,
+                agent_name,
+                input_data=_strip_self_if_method(args),
+                agent_id=agent_id,
+                version=version,
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -493,7 +533,11 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
                     guard_exit(token)
 
             span = create_agent_span(
-                target_path, agent_name, input_data=_strip_self_if_method(args)
+                target_path,
+                agent_name,
+                input_data=_strip_self_if_method(args),
+                agent_id=agent_id,
+                version=version,
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -542,7 +586,11 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
                     guard_exit(token)
 
             span = create_agent_span(
-                target_path, agent_name, input_data=_strip_self_if_method(args)
+                target_path,
+                agent_name,
+                input_data=_strip_self_if_method(args),
+                agent_id=agent_id,
+                version=version,
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -580,7 +628,13 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
             finally:
                 guard_exit(token)
 
-        span = create_agent_span(target_path, agent_name, input_data=_strip_self_if_method(args))
+        span = create_agent_span(
+            target_path,
+            agent_name,
+            input_data=_strip_self_if_method(args),
+            agent_id=agent_id,
+            version=version,
+        )
         lifecycle = construct._lifecycle
         parent_span_id = lifecycle.start_span_manual(span)
 
@@ -608,7 +662,12 @@ def _wrap_agent_function(func: F, agent_name: str) -> F:
 
 
 def _decorate_agent_class(
-    cls: type, agent_name: str, explicit_entry_points: str | list[str] | None
+    cls: type,
+    agent_name: str,
+    explicit_entry_points: str | list[str] | None,
+    *,
+    agent_id: str | None = None,
+    version: str | None = None,
 ) -> type:
     """Decorate a class by wrapping all matching entry methods."""
     _check_class_not_linked(cls, "agent")
@@ -646,15 +705,33 @@ def _decorate_agent_class(
         # This preserves staticmethod/classmethod wrappers for both direct and inherited methods
         raw = _get_descriptor_from_mro(cls, method_name)
         if isinstance(raw, staticmethod):
-            wrapped_fn = _wrap_agent_method(raw.__func__, agent_name, method_target_path)
+            wrapped_fn = _wrap_agent_method(
+                raw.__func__,
+                agent_name,
+                method_target_path,
+                agent_id=agent_id,
+                version=version,
+            )
             to_set: staticmethod[..., Any] | classmethod[Any, ..., Any] | Callable[..., Any]
             to_set = staticmethod(wrapped_fn)
         elif isinstance(raw, classmethod):
-            wrapped_fn = _wrap_agent_method(raw.__func__, agent_name, method_target_path)
+            wrapped_fn = _wrap_agent_method(
+                raw.__func__,
+                agent_name,
+                method_target_path,
+                agent_id=agent_id,
+                version=version,
+            )
             to_set = classmethod(wrapped_fn)
         else:
             original = getattr(cls, method_name)
-            to_set = _wrap_agent_method(original, agent_name, method_target_path)
+            to_set = _wrap_agent_method(
+                original,
+                agent_name,
+                method_target_path,
+                agent_id=agent_id,
+                version=version,
+            )
 
         try:
             setattr(cls, method_name, to_set)
@@ -677,7 +754,12 @@ def _decorate_agent_class(
 
 
 def _patch_agent_object(
-    obj: object, agent_name: str, explicit_entry_points: str | list[str] | None
+    obj: object,
+    agent_name: str,
+    explicit_entry_points: str | list[str] | None,
+    *,
+    agent_id: str | None = None,
+    version: str | None = None,
 ) -> object:
     """Patch entry methods on a framework object instance.
 
@@ -711,7 +793,14 @@ def _patch_agent_object(
         original = getattr(obj, method_name, None)
         if original is not None and callable(original):
             method_target_path = f"{obj_type.__module__}.{obj_type.__qualname__}.{method_name}"
-            wrapped = _make_agent_object_wrapper(original, agent_name, obj, method_target_path)
+            wrapped = _make_agent_object_wrapper(
+                original,
+                agent_name,
+                obj,
+                method_target_path,
+                agent_id=agent_id,
+                version=version,
+            )
             try:
                 setattr(obj, method_name, wrapped)
                 patched_any = True
@@ -820,6 +909,9 @@ def _make_agent_object_wrapper(
     agent_name: str,
     obj: object,
     method_target_path: str | None = None,
+    *,
+    agent_id: str | None = None,
+    version: str | None = None,
 ) -> Callable[..., Any]:
     """Create wrapper for framework object method.
 
@@ -828,6 +920,8 @@ def _make_agent_object_wrapper(
         agent_name: Display name for the agent span.
         obj: The object instance being patched (for re-entrancy guard).
         method_target_path: Fully qualified path for span identity.
+        agent_id: Stable agent identifier that survives renames.
+        version: Agent version string for regression tracking.
     """
     if getattr(original, ATTR_WRAPPED, False):
         return original
@@ -853,7 +947,11 @@ def _make_agent_object_wrapper(
                 return
 
             span = create_agent_span(
-                method_target_path or f"unknown.{agent_name}", agent_name, input_data=args
+                method_target_path or f"unknown.{agent_name}",
+                agent_name,
+                input_data=args,
+                agent_id=agent_id,
+                version=version,
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -900,7 +998,11 @@ def _make_agent_object_wrapper(
                     guard_exit(token)
 
             span = create_agent_span(
-                method_target_path or f"unknown.{agent_name}", agent_name, input_data=args
+                method_target_path or f"unknown.{agent_name}",
+                agent_name,
+                input_data=args,
+                agent_id=agent_id,
+                version=version,
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -946,7 +1048,11 @@ def _make_agent_object_wrapper(
                     guard_exit(token)
 
             span = create_agent_span(
-                method_target_path or f"unknown.{agent_name}", agent_name, input_data=args
+                method_target_path or f"unknown.{agent_name}",
+                agent_name,
+                input_data=args,
+                agent_id=agent_id,
+                version=version,
             )
             lifecycle = construct._lifecycle
             parent_span_id = lifecycle.start_span_manual(span)
@@ -1674,6 +1780,8 @@ def link_agent(name: F) -> F: ...
 def link_agent(
     name: str | None = None,
     *,
+    id: str | None = None,
+    version: str | None = None,
     entry_points: str | list[str] | None = None,
 ) -> Callable[[F], F]: ...  # @link_agent() or @link_agent("name")
 
@@ -1681,6 +1789,8 @@ def link_agent(
 def link_agent(
     name: str | Callable[..., Any] | None = None,
     *,
+    id: str | None = None,
+    version: str | None = None,
     entry_points: str | list[str] | None = None,
 ) -> Callable[..., Any]:
     """Decorator to register agent functions, classes, or objects with Tenro.
@@ -1702,10 +1812,14 @@ def link_agent(
     - @link_agent
     - @link_agent()
     - @link_agent("CustomName")
+    - @link_agent(name="router", id="agt_router", version="2026.04.11")
 
     Args:
         name: Agent name for the span. If None, uses function/class name.
             Can also be the target itself when used without parentheses.
+        id: Stable agent identifier that survives renames.
+            Falls back to name, then target_path when not set.
+        version: Agent version string (e.g., ``"2026.04.11"``, ``"1.4.2"``).
         entry_points: For classes only. Explicit method name(s) to wrap.
             Can be a single string or list of strings. If None, auto-detects
             common entry methods (run, invoke, execute, call, stream, etc.).
@@ -1730,10 +1844,9 @@ def link_agent(
         ...     async def execute(self, prompt: str) -> str:
         ...         return "result"
         >>>
-        >>> @link_agent("MultiEntry", entry_points=["run", "stream"])
-        ... class MultiEntryAgent:
+        >>> @link_agent(name="router", id="agt_router", version="2026.04.11")
+        ... class SupportRouter:
         ...     def run(self, task: str) -> str: ...
-        ...     def stream(self, task: str) -> Iterator[str]: ...
     """
     resolved_name: str | None = None if callable(name) and not isinstance(name, str) else name
 
@@ -1747,16 +1860,20 @@ def link_agent(
         )
 
         if target_type == TargetType.CLASS:
-            return _decorate_agent_class(target, agent_name, entry_points)
+            return _decorate_agent_class(
+                target, agent_name, entry_points, agent_id=id, version=version
+            )
         elif target_type == TargetType.FRAMEWORK_OBJECT:
-            return _patch_agent_object(target, agent_name, entry_points)
+            return _patch_agent_object(
+                target, agent_name, entry_points, agent_id=id, version=version
+            )
         else:
             if entry_points is not None:
                 raise TypeError(
                     f"@link_agent('{agent_name}', entry_points=...): "
                     f"entry_points is only valid for classes, not functions"
                 )
-            return _wrap_agent_function(target, agent_name)
+            return _wrap_agent_function(target, agent_name, agent_id=id, version=version)
 
     if callable(name) and not isinstance(name, str):
         # name is the target function when used as @link_agent without parens

@@ -157,7 +157,7 @@ class BaseSpan(BaseModel):
         trace_id: Trace identifier (32 hex chars).
         start_time: Unix nanoseconds (from ``time.time_ns()``) when the span started.
         parent_span_id: Immediate parent span ID (Agent, LLM, or Tool).
-        agent_id: Closest agent ancestor span ID, if any.
+        agent_span_id: Closest agent ancestor span ID, if any.
         error: Error message if the span failed.
         span_type: Discriminator for span subclass.
         kind: OTel SpanKind.
@@ -182,7 +182,7 @@ class BaseSpan(BaseModel):
     start_time: int
 
     parent_span_id: str | None = None
-    agent_id: str | None = None
+    agent_span_id: str | None = None
     error: str | None = None
 
     span_type: SpanType
@@ -204,7 +204,7 @@ class BaseSpan(BaseModel):
     _validate_trace_flags = field_validator("trace_flags")(_validate_trace_flags)
     _validate_trace_state = field_validator("trace_state")(_validate_trace_state)
     _validate_parent_span_id = field_validator("parent_span_id")(_validate_optional_span_id)
-    _validate_agent_id = field_validator("agent_id")(_validate_optional_span_id)
+    _validate_agent_span_id = field_validator("agent_span_id")(_validate_optional_span_id)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -344,7 +344,7 @@ class AgentRun(BaseSpan):
     spans for LLM calls and tool calls.
 
     The `span_id` field is a unique span identifier for this specific run.
-    The `agent_id` field equals `span_id` (an agent belongs to itself).
+    The `agent_span_id` field equals `span_id` (an agent belongs to itself).
 
     Used for:
     - Multi-agent hierarchies (Manager -> Researcher -> Writer)
@@ -355,6 +355,9 @@ class AgentRun(BaseSpan):
         target_path: Fully qualified path for verification matching
             (e.g., "mymod.MyAgent.run"). Used by verify_agent() to match spans.
         display_name: Human-readable agent name (for display/trace output).
+        agent_id: Stable agent identifier that survives renames.
+            Falls back to display_name, then target_path when not set.
+        version: Agent version string for deploy/config regression tracking.
         parent_agent_id: Parent agent span identifier, if any.
         invoked_by_tool_call_id: ID of the ToolCall that spawned this agent, if any.
         spans: Child spans collected under this agent.
@@ -366,6 +369,8 @@ class AgentRun(BaseSpan):
 
     target_path: str
     display_name: str | None = None
+    agent_id: str | None = None
+    version: str | None = None
     parent_agent_id: str | None = None
     invoked_by_tool_call_id: str | None = None
     spans: list[SpanUnion] = Field(default_factory=list)
@@ -378,10 +383,10 @@ class AgentRun(BaseSpan):
     _validate_invoked_by = field_validator("invoked_by_tool_call_id")(_validate_optional_span_id)
 
     @model_validator(mode="after")
-    def _default_agent_id(self) -> Self:
-        """An agent belongs to itself: agent_id defaults to span_id."""
-        if self.agent_id is None:
-            self.agent_id = self.span_id
+    def _default_agent_span_id(self) -> Self:
+        """An agent belongs to itself: agent_span_id defaults to span_id."""
+        if self.agent_span_id is None:
+            self.agent_span_id = self.span_id
         return self
 
     def get_llm_calls(self, recursive: bool = True) -> list[LLMCall]:

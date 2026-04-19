@@ -14,9 +14,9 @@ import json
 
 from examples.experimental.crewai.myapp.agents import RAGPipeline, fetch_docs
 
+import tenro
 from tenro import Provider
 from tenro.simulate import agent, llm, tool
-from tenro.testing import tenro
 
 
 def react_action(tool_name: str, tool_input: dict) -> str:
@@ -33,7 +33,7 @@ def react_final(answer: str) -> str:
     return f"Thought: I now know the final answer.\nFinal Answer: {answer}\n"
 
 
-@tenro
+@tenro.simulate
 def test_rag_pipeline_synthesizes_answer() -> None:
     """Test RAG pipeline fetches documents and generates answer."""
     tool.simulate(
